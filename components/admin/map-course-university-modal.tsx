@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -14,7 +14,19 @@ interface MapCourseUniversityModalProps {
   onSuccess?: () => void
 }
 
+interface Course {
+  id: string
+  name: string
+}
+
+interface University {
+  id: string
+  name: string
+}
+
 export function MapCourseUniversityModal({ onSuccess }: MapCourseUniversityModalProps) {
+  const [courses, setCourses] = useState<Course[]>([])
+  const [universities, setUniversities] = useState<University[]>([])
   const [formData, setFormData] = useState({
     university_id: "",
     course_id: "",
@@ -37,23 +49,90 @@ export function MapCourseUniversityModal({ onSuccess }: MapCourseUniversityModal
 
   const [loading, setLoading] = useState(false)
 
+  useEffect(() => {
+    loadCourses()
+    loadUniversities()
+  }, [])
+
+  const loadCourses = async () => {
+    const token = localStorage.getItem('token')
+    if (!token) return
+    try {
+      const response = await fetch('https://perl-backend-env.up.railway.app/api/courses', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (response.ok) {
+        const data = await response.json()
+        const coursesData = data.success ? data.data : data
+        setCourses(Array.isArray(coursesData) ? coursesData : [])
+      }
+    } catch (error) {
+      console.error('Failed to load courses:', error)
+    }
+  }
+
+  const loadUniversities = async () => {
+    const token = localStorage.getItem('token')
+    if (!token) return
+    try {
+      const response = await fetch('https://perl-backend-env.up.railway.app/api/universities', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (response.ok) {
+        const data = await response.json()
+        const universitiesData = data.data?.universities || data.universities || data || []
+        if (!Array.isArray(universitiesData)) {
+          setUniversities([])
+        } else {
+          const uniqueUniversities = universitiesData.filter((u, index, arr) => arr.findIndex(u2 => u2.id === u.id) === index)
+          setUniversities(uniqueUniversities)
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load universities:', error)
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
 
     try {
-      const selectedFees = oneTimeFees.filter(f => f.selected)
-      const response = await fetch("/api/university-courses/map", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...formData, one_time_fees: selectedFees }),
+      const token = localStorage.getItem('token')
+      
+      // First, fetch the current course
+      const getResponse = await fetch(`https://perl-backend-env.up.railway.app/api/courses/${formData.course_id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      
+      if (!getResponse.ok) {
+        throw new Error('Failed to fetch course')
+      }
+      
+      const currentCourse = await getResponse.json()
+      const currentCourseData = currentCourse.success ? currentCourse.data : currentCourse
+      
+      // Update universityIds
+      const currentUniversityIds = currentCourseData.universityIds || []
+      const updatedUniversityIds = [...new Set([...currentUniversityIds, formData.university_id])]
+      
+      // PUT the updated course
+      const putResponse = await fetch(`https://perl-backend-env.up.railway.app/api/courses/${formData.course_id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ universityIds: updatedUniversityIds }),
       })
 
-      if (response.ok) {
+      if (putResponse.ok) {
         onSuccess?.()
+      } else {
+        throw new Error('Failed to update course')
       }
     } catch (error) {
-      console.error("Failed to map course:", error)
+      console.error('Failed to map course:', error)
     } finally {
       setLoading(false)
     }
@@ -97,10 +176,11 @@ export function MapCourseUniversityModal({ onSuccess }: MapCourseUniversityModal
               <SelectValue placeholder="Select university" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="1">Delhi University</SelectItem>
-              <SelectItem value="2">Mumbai University</SelectItem>
-              <SelectItem value="3">Bangalore Institute of Technology</SelectItem>
-              <SelectItem value="4">Chennai Medical College</SelectItem>
+              {universities.map((university) => (
+                <SelectItem key={`university-${university.id}`} value={university.id}>
+                  {university.name}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -112,11 +192,11 @@ export function MapCourseUniversityModal({ onSuccess }: MapCourseUniversityModal
               <SelectValue placeholder="Select course" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="1">B.Tech Computer Science</SelectItem>
-              <SelectItem value="2">M.Tech AI & Machine Learning</SelectItem>
-              <SelectItem value="3">BCA - Computer Applications</SelectItem>
-              <SelectItem value="4">MBA - General Management</SelectItem>
-              <SelectItem value="5">B.Sc Nursing</SelectItem>
+              {courses.map((course) => (
+                <SelectItem key={`course-${course.id}`} value={course.id}>
+                  {course.name}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>

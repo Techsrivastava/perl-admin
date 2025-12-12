@@ -13,7 +13,7 @@ npm install
 npm run dev
 
 # Open browser
-http://localhost:3000/admin
+https://perl-backend-env.up.railway.app/api//admin
 ```
 
 ## 🔗 Backend Connection Setup

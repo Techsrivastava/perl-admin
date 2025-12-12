@@ -60,10 +60,33 @@ export function UniversityForm({ onSuccess }: UniversityFormProps) {
     setLoading(true)
 
     try {
-      const response = await fetch("/api/universities", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+      const token = localStorage.getItem('token')
+      
+      // Transform frontend data to backend format
+      const backendData = {
+        name: formData.name,
+        abbreviation: formData.short_name.toUpperCase(),
+        establishedYear: parseInt(formData.established_year),
+        type: formData.registration_type.charAt(0).toUpperCase() + formData.registration_type.slice(1), // Capitalize
+        description: formData.name + ' university description', // Default description
+        contactEmail: formData.email,
+        contactPhone: formData.phone,
+        address: `${formData.address}, ${formData.city}, ${formData.state}`,
+        // Optional fields
+        bankName: '',
+        accountNumber: '',
+        ifscCode: '',
+        branch: '',
+        isActive: true,
+      }
+
+      const response = await fetch('https://perl-backend-env.up.railway.app/api/universities', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(backendData),
       })
 
       if (response.ok) {
@@ -92,9 +115,14 @@ export function UniversityForm({ onSuccess }: UniversityFormProps) {
           password: "",
           confirm_password: "",
         })
+      } else {
+        const errorData = await response.json()
+        console.error('University creation failed:', errorData)
+        alert(`Failed to create university: ${errorData.message || 'Unknown error'}`)
       }
     } catch (error) {
-      console.error("Failed to create university:", error)
+      console.error('Failed to create university:', error)
+      alert('Failed to create university')
     } finally {
       setLoading(false)
     }
@@ -213,10 +241,10 @@ export function UniversityForm({ onSuccess }: UniversityFormProps) {
                 <SelectValue placeholder="Select type" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="government">Government</SelectItem>
-                <SelectItem value="private">Private</SelectItem>
-                <SelectItem value="autonomous">Autonomous</SelectItem>
-                <SelectItem value="deemed">Deemed University</SelectItem>
+                <SelectItem value="Government">Government</SelectItem>
+                <SelectItem value="Private">Private</SelectItem>
+                <SelectItem value="Autonomous">Autonomous</SelectItem>
+                <SelectItem value="Deemed">Deemed University</SelectItem>
               </SelectContent>
             </Select>
           </div>

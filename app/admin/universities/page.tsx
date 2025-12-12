@@ -1,16 +1,15 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useSession } from "next-auth/react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Plus, Edit2, Trash2, Eye, ChevronRight, Settings } from "lucide-react"
+import { Plus, Edit2, Trash2, Settings } from "lucide-react"
 import { UniversityForm } from "@/components/admin/university-form"
 import { UniversityPermissionsModal } from "@/components/admin/university-permissions-modal"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 
 interface University {
-  id: number
+  id: string
   name: string
   registration_number: string
   status: string
@@ -20,7 +19,7 @@ interface University {
 }
 
 export default function UniversitiesPage() {
-  const { data: session } = useSession()
+  const [token, setToken] = useState<string>('')
   const [universities, setUniversities] = useState<University[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -28,22 +27,27 @@ export default function UniversitiesPage() {
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [permissionsDialogOpen, setPermissionsDialogOpen] = useState(false)
-  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
 
   // Load universities data on component mount
   useEffect(() => {
-    if (session?.accessToken) {
-      loadUniversities()
+    const storedToken = localStorage.getItem('token')
+    if (storedToken) {
+      setToken(storedToken)
+      loadUniversities(storedToken)
+    } else {
+      setLoading(false)
+      setError('No authentication token found')
     }
-  }, [session])
+  }, [])
 
-  const loadUniversities = async () => {
+  const loadUniversities = async (authToken: string) => {
     try {
       setLoading(true)
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://perl-backend-env.up.railway.app/api/'
+      const backendUrl = 'https://perl-backend-env.up.railway.app'
       const response = await fetch(`${backendUrl}/api/universities`, {
         headers: {
-          'Authorization': `Bearer ${session?.accessToken}`,
+          'Authorization': `Bearer ${authToken}`,
         },
       })
       if (response.ok) {
@@ -65,7 +69,7 @@ export default function UniversitiesPage() {
     }
   }
 
-  const handleDelete = (id: number) => {
+  const handleDelete = (id: string) => {
     setUniversities(universities.filter((u) => u.id !== id))
     setDeleteConfirmId(null)
     alert('University deleted successfully!')
@@ -111,7 +115,7 @@ export default function UniversitiesPage() {
             </DialogHeader>
             <UniversityForm onSuccess={() => {
               setAddDialogOpen(false)
-              loadUniversities() // Reload universities
+              loadUniversities(token) // Reload universities
               alert('University created successfully!')
             }} />
           </DialogContent>
@@ -199,7 +203,7 @@ export default function UniversitiesPage() {
             onSuccess={() => {
               setEditDialogOpen(false)
               setSelectedUni(null)
-              loadUniversities() // Reload universities
+              loadUniversities(token) // Reload universities
               alert('University updated successfully!')
             }} 
           />
@@ -216,12 +220,12 @@ export default function UniversitiesPage() {
             <DialogTitle>University Permissions - {selectedUni?.name}</DialogTitle>
           </DialogHeader>
           <UniversityPermissionsModal 
-            universityId={selectedUni?.id || 0}
+            universityId={selectedUni?.id}
             universityName={selectedUni?.name || ""}
             onSuccess={() => {
               setPermissionsDialogOpen(false)
               setSelectedUni(null)
-              loadUniversities() // Reload universities
+              loadUniversities(token) // Reload universities
               alert('Permissions updated successfully!')
             }} 
           />

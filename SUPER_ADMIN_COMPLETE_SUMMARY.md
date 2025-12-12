@@ -396,12 +396,12 @@ npm run dev
 ```
 
 ### **Access Points**
-- Dashboard: `http://localhost:3000/admin`
-- Universities: `http://localhost:3000/admin/universities`
-- Courses: `http://localhost:3000/admin/courses`
-- Admissions: `http://localhost:3000/admin/admissions`
-- Payments: `http://localhost:3000/admin/payments`
-- Wallet: `http://localhost:3000/admin/wallet`
+- Dashboard: `https://perl-backend-env.up.railway.app/api//admin`
+- Universities: `https://perl-backend-env.up.railway.app/api//admin/universities`
+- Courses: `https://perl-backend-env.up.railway.app/api//admin/courses`
+- Admissions: `https://perl-backend-env.up.railway.app/api//admin/admissions`
+- Payments: `https://perl-backend-env.up.railway.app/api//admin/payments`
+- Wallet: `https://perl-backend-env.up.railway.app/api//admin/wallet`
 
 ---
 

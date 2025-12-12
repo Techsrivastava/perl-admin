@@ -2,16 +2,14 @@
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Checkbox } from "@/components/ui/checkbox"
+import { Input } from "@/components/ui/input"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { GraduationCap, Sparkles, AlertCircle, DollarSign, Settings, Eye, ChevronDown, ChevronRight } from "lucide-react"
-import { useSession } from "next-auth/react"
+import { Label } from "@/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
+import { Checkbox } from "@/components/ui/checkbox"
+import { GraduationCap, Sparkles, AlertCircle, DollarSign, ChevronDown, ChevronRight, Settings, Eye } from "lucide-react"
 
 interface CourseAutopilotFormProps {
   onSuccess?: () => void
@@ -29,9 +27,29 @@ interface MasterCourse {
   eligibility?: string[]
 }
 
+interface University {
+  id: string
+  name: string
+}
+
+interface CourseFormData {
+  selectedMasterCourseId: string
+  universityIds: string[]
+  courseMode: string
+  customDescription: string
+  intakeCapacity: string
+  availableSeats: string
+  selectedAdmissionTypes: string[]
+  totalCourseFee: string
+  courseDuration: string
+  requiredDocuments: string[]
+  showOnApp: boolean
+  courseStatus: string
+}
+
 export function CourseAutopilotForm({ onSuccess, editMode = false, courseData }: CourseAutopilotFormProps) {
-  const { data: session } = useSession()
   const [masterCourses, setMasterCourses] = useState<MasterCourse[]>([])
+  const [universities, setUniversities] = useState<University[]>([])
   const [expandedSections, setExpandedSections] = useState({
     basic: true,
     fees: false,
@@ -41,16 +59,17 @@ export function CourseAutopilotForm({ onSuccess, editMode = false, courseData }:
     visibility: false,
   })
 
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<CourseFormData>({
     // SECTION A: Master Course Selection
     selectedMasterCourseId: "",
+    universityIds: [],
 
     // SECTION B: Basic Information
     courseMode: 'Regular',
     customDescription: "",
     intakeCapacity: "",
     availableSeats: "",
-    selectedAdmissionTypes: [] as string[],
+    selectedAdmissionTypes: [],
 
     // SECTION C: Fee Structure
     totalCourseFee: "",
@@ -68,6 +87,7 @@ export function CourseAutopilotForm({ onSuccess, editMode = false, courseData }:
 
   useEffect(() => {
     loadMasterCourses()
+    loadUniversities()
     if (editMode && courseData) {
       // Load existing course data for editing
       setFormData(prev => ({
@@ -79,15 +99,41 @@ export function CourseAutopilotForm({ onSuccess, editMode = false, courseData }:
 
   const loadMasterCourses = async () => {
     try {
-      // In a real app, this would fetch from the backend
-      setMasterCourses([
-        { id: '1', name: 'Bachelor of Technology in Computer Science', abbreviation: 'B.Tech CS', level: 'UG', department: 'Engineering', duration: '4 years', eligibility: ['12th with 50% in PCM'] },
-        { id: '2', name: 'Master of Technology in AI', abbreviation: 'M.Tech AI', level: 'PG', department: 'Engineering', duration: '2 years', eligibility: ['B.Tech with 60%'] },
-        { id: '3', name: 'Bachelor of Medicine and Bachelor of Surgery', abbreviation: 'MBBS', level: 'UG', department: 'Medical', duration: '5.5 years', eligibility: ['12th with 50% in PCB', 'NEET qualified'] },
-        { id: '4', name: 'Master of Business Administration', abbreviation: 'MBA', level: 'PG', department: 'Management', duration: '2 years', eligibility: ['Bachelor\'s degree with 50%'] },
-      ])
+      const response = await fetch('https://perl-backend-env.up.railway.app/courses/master', {
+        headers: { 'Content-Type': 'application/json' }
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setMasterCourses(data.courses || data)
+      } else {
+        console.error('Failed to load master courses')
+        setMasterCourses([])
+      }
     } catch (error) {
       console.error('Error loading master courses:', error)
+      setMasterCourses([])
+    }
+  }
+
+  const loadUniversities = async () => {
+    const token = localStorage.getItem('token')
+    if (!token) return
+    try {
+      const response = await fetch('https://perl-backend-env.up.railway.app/api/universities', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (response.ok) {
+        const data = await response.json()
+        const universitiesData = data.data?.universities || data.universities || data || []
+        if (!Array.isArray(universitiesData)) {
+          setUniversities([])
+        } else {
+          const uniqueUniversities = universitiesData.filter((u, index, arr) => arr.findIndex(u2 => u2.id === u.id) === index)
+          setUniversities(uniqueUniversities)
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load universities:', error)
     }
   }
 
@@ -116,6 +162,9 @@ export function CourseAutopilotForm({ onSuccess, editMode = false, courseData }:
         return
       }
 
+      const token = localStorage.getItem('token')
+      const url = editMode ? `https://perl-backend-env.up.railway.app/api/courses/${courseData?.id}` : 'https://perl-backend-env.up.railway.app/api/courses'
+
       const backendData = {
         // Transform frontend data to backend format
         name: formData.selectedMasterCourseId ? masterCourses.find(c => c.id === formData.selectedMasterCourseId)?.name : '',
@@ -132,25 +181,24 @@ export function CourseAutopilotForm({ onSuccess, editMode = false, courseData }:
         description: formData.customDescription,
         eligibility: masterCourses.find(c => c.id === formData.selectedMasterCourseId)?.eligibility || [],
         isActive: formData.showOnApp,
+        status: formData.courseStatus.toLowerCase(),
+        ...(formData.universityIds.length > 0 && { universityIds: formData.universityIds }),
       }
 
-      console.log('Submitting course data:', backendData)
-
-      const response = await fetch("/api/courses", {
+      const response = await fetch(url, {
         method: editMode ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(editMode ? { ...backendData, id: courseData?.id } : backendData),
+        headers: {
+          "Content-Type": "application/json",
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(backendData),
       })
-
-      console.log('Course API response status:', response.status)
 
       if (response.ok) {
         const result = await response.json()
-        console.log('Course API success:', result)
         onSuccess?.()
       } else {
         const errorText = await response.text()
-        console.error('Course API error:', errorText)
         alert(`Failed to ${editMode ? 'update' : 'create'} course: ${errorText}`)
       }
     } catch (error) {
@@ -193,6 +241,34 @@ export function CourseAutopilotForm({ onSuccess, editMode = false, courseData }:
             <CollapsibleContent>
               <CardContent className="pt-4 space-y-4">
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <div className="lg:col-span-2">
+                    <Label htmlFor="university" className="text-base font-medium">Select Universities</Label>
+                    <div className="flex flex-wrap gap-3 mt-2">
+                      {universities.map((university) => (
+                        <div key={university.id} className="flex items-center space-x-2">
+                          <Checkbox
+                            id={university.id}
+                            checked={formData.universityIds.includes(university.id)}
+                            onCheckedChange={(checked) => {
+                              if (checked) {
+                                setFormData({
+                                  ...formData,
+                                  universityIds: [...formData.universityIds, university.id]
+                                })
+                              } else {
+                                setFormData({
+                                  ...formData,
+                                  universityIds: formData.universityIds.filter(id => id !== university.id)
+                                })
+                              }
+                            }}
+                          />
+                          <Label htmlFor={university.id} className="text-sm">{university.name}</Label>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
                   <div className="lg:col-span-2">
                     <Label htmlFor="master_course" className="text-base font-medium">Select Course from Master Database *</Label>
                     <Select value={formData.selectedMasterCourseId} onValueChange={(value) => setFormData({ ...formData, selectedMasterCourseId: value })}>
@@ -473,6 +549,7 @@ export function CourseAutopilotForm({ onSuccess, editMode = false, courseData }:
                 <AlertCircle className="w-5 h-5 text-blue-600 mb-2" />
                 <h4 className="font-semibold mb-2">Course Preview</h4>
                 <div className="text-sm space-y-1">
+                  <p><strong>Universities:</strong> {formData.universityIds.map(id => universities.find(u => u.id === id)?.name).filter(Boolean).join(', ') || "None selected"}</p>
                   <p><strong>Master Course:</strong> {selectedMasterCourse?.name || "Not selected"}</p>
                   <p><strong>Mode:</strong> {formData.courseMode} | <strong>Duration:</strong> {formData.courseDuration} years</p>
                   <p><strong>Total Fee:</strong> ₹{formData.totalCourseFee || "0"} | <strong>Intake:</strong> {formData.intakeCapacity || "0"} students</p>

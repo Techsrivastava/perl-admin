@@ -1,7 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { useSession } from "next-auth/react"
+import { useEffect, useState } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -108,8 +107,8 @@ interface UniversityCourse {
 }
 
 export default function CoursesPage() {
-  const { data: session } = useSession()
   const { toast } = useToast()
+  const [token, setToken] = useState<string>('')
   const [courses, setCourses] = useState<Course[]>([])
   const [universityCourses, setUniversityCourses] = useState<UniversityCourse[]>([])
   const [loading, setLoading] = useState(true)
@@ -125,20 +124,25 @@ export default function CoursesPage() {
 
   // Load data on component mount
   useEffect(() => {
-    if (session?.accessToken) {
-      loadCourses()
+    const storedToken = localStorage.getItem('token')
+    if (storedToken) {
+      setToken(storedToken)
+      loadCourses(storedToken)
       loadUniversityCourses()
+    } else {
+      setLoading(false)
+      setError('No authentication token found')
     }
-  }, [session])
+  }, [])
 
-  const loadCourses = async () => {
+  const loadCourses = async (authToken: string) => {
     try {
       console.log("Loading courses...")
       setLoading(true)
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://perl-backend-env.up.railway.app/api/'
+      const backendUrl = 'https://perl-backend-env.up.railway.app'
       const response = await fetch(`${backendUrl}/api/courses`, {
         headers: {
-          'Authorization': `Bearer ${session?.accessToken}`,
+          'Authorization': `Bearer ${authToken}`,
         },
       })
 
@@ -146,7 +150,8 @@ export default function CoursesPage() {
         const data = await response.json()
         // Assuming backend returns data directly or wrapped in success response
         const coursesData = data.success ? data.data : data
-        setCourses(Array.isArray(coursesData) ? coursesData : [])
+        const uniqueCourses = (Array.isArray(coursesData) ? coursesData : []).filter((c, index, arr) => arr.findIndex(c2 => c2.id === c.id) === index)
+        setCourses(uniqueCourses)
         setError(null)
       } else {
         const errorText = await response.text()
@@ -163,30 +168,46 @@ export default function CoursesPage() {
 
   const loadUniversityCourses = async () => {
     try {
-      // For now, we'll keep the static data since there's no dedicated API for university courses yet
-      // This would typically fetch from /api/university-courses
-      setUniversityCourses([
-        {
-          id: 1,
-          course_name: "B.Tech Computer Science",
-          university_name: "Delhi University",
-          university_fee: 400000,
-          student_display_fee: 500000,
-          consultancy_share: 50000,
-          agent_commission: 25000,
-          fee_mode: "share_deduct",
+      const backendUrl = 'https://perl-backend-env.up.railway.app'
+      
+      // Fetch universities for name mapping
+      const uniResponse = await fetch(`${backendUrl}/api/universities`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
         },
-        {
-          id: 2,
-          course_name: "M.Tech AI",
-          university_name: "Mumbai University",
-          university_fee: 500000,
-          student_display_fee: 600000,
-          consultancy_share: 60000,
-          agent_commission: 30000,
-          fee_mode: "full_fee",
+      })
+      
+      let uniMap = {}
+      if (uniResponse.ok) {
+        const uniData = await uniResponse.json()
+        const unis = uniData.data?.universities || uniData.universities || uniData || []
+        uniMap = (Array.isArray(unis) ? unis : []).reduce((acc, uni) => ({ ...acc, [uni.id]: uni.name }), {})
+      }
+
+      // Fetch courses and transform to mappings
+      const courseResponse = await fetch(`${backendUrl}/api/courses`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
         },
-      ])
+      })
+
+      if (courseResponse.ok) {
+        const courseData = await courseResponse.json()
+        const coursesData = courseData.success ? courseData.data : courseData
+        const transformed = (Array.isArray(coursesData) ? coursesData : []).flatMap(course => 
+          course.universityIds?.map((uniId, index) => ({
+            id: course.id * 100 + index,
+            course_name: course.name,
+            university_name: uniMap[uniId] || `University ${uniId}`,
+            university_fee: course.fees || 0,
+            student_display_fee: course.fees ? course.fees * 1.2 : 0,
+            consultancy_share: course.fees ? course.fees * 0.1 : 0,
+            agent_commission: course.fees ? course.fees * 0.05 : 0,
+            fee_mode: 'share_deduct'
+          })) || []
+        )
+        setUniversityCourses(transformed)
+      }
     } catch (error) {
       console.error('Error loading university courses:', error)
     }
@@ -196,11 +217,11 @@ export default function CoursesPage() {
     if (!confirm("Are you sure you want to delete this course?")) return
 
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://perl-backend-env.up.railway.app/api/'
+      const backendUrl = 'https://perl-backend-env.up.railway.app'
       const response = await fetch(`${backendUrl}/api/courses/${id}`, {
         method: 'DELETE',
         headers: {
-          'Authorization': `Bearer ${session?.accessToken}`,
+          'Authorization': `Bearer ${token}`,
         },
       })
 
@@ -326,7 +347,7 @@ export default function CoursesPage() {
                   onSuccess={() => {
                     setAutopilotDialogOpen(false)
                     setEditingCourse(null)
-                    loadCourses() // Reload courses
+                    loadCourses(token) // Reload courses
                     toast({
                       title: "Success",
                       description: `Course ${editingCourse ? 'updated' : 'created'} successfully`,

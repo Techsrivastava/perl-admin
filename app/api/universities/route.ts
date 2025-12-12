@@ -34,9 +34,9 @@ export async function GET(request: NextRequest) {
 
     // Transform backend data to match frontend expectations
     const universities = backendData.data.map((uni: any) => ({
-      id: uni._id,
+      id: uni._id.toString(),
       name: uni.name,
-      registration_number: `UNI-${uni._id.slice(-6).toUpperCase()}`,
+      registration_number: `UNI-${uni._id.toString().slice(-6).toUpperCase()}`,
       status: uni.isActive ? 'approved' : 'pending',
       contact_email: uni.contactEmail,
       total_students: Math.floor(Math.random() * 200) + 50, // Mock for now

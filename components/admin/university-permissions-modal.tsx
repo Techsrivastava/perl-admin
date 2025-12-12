@@ -25,7 +25,7 @@ interface UniversityPermissions {
 }
 
 interface UniversityPermissionsModalProps {
-  universityId?: number
+  universityId?: string
   universityName?: string
   onSuccess?: () => void
 }

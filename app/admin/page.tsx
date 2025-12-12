@@ -4,7 +4,6 @@ import { useEffect, useState } from "react"
 import { Card } from "@/components/ui/card"
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts"
 import { Building2, Briefcase, Users, TrendingUp, DollarSign, RefreshCw } from "lucide-react"
-import { useSession } from "next-auth/react"
 import { toast } from "@/hooks/use-toast"
 import { Button } from "@/components/ui/button"
 
@@ -41,17 +40,15 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
-  const { data: session } = useSession()
+  const [token, setToken] = useState<string>('')
 
-  const fetchDashboardData = async (showToast = false) => {
-    if (!session?.accessToken) return
-
+  const fetchDashboardData = async (authToken: string, showToast = false) => {
     try {
       setRefreshing(true)
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://perl-backend-env.up.railway.app/api/'
+      const backendUrl = 'https://perl-backend-env.up.railway.app'
       const response = await fetch(`${backendUrl}/api/dashboard`, {
         headers: {
-          'Authorization': `Bearer ${session.accessToken}`,
+          'Authorization': `Bearer ${authToken}`,
         },
       })
 
@@ -86,11 +83,17 @@ export default function DashboardPage() {
   }
 
   useEffect(() => {
-    fetchDashboardData()
-  }, [session])
+    const storedToken = localStorage.getItem('token')
+    if (storedToken) {
+      setToken(storedToken)
+      fetchDashboardData(storedToken)
+    } else {
+      setLoading(false)
+    }
+  }, [])
 
   const handleRefresh = () => {
-    fetchDashboardData(true)
+    fetchDashboardData(token, true)
   }
 
   if (loading) return <div className="p-8">Loading dashboard...</div>
