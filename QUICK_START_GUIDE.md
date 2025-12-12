@@ -30,7 +30,7 @@ npm run dev
 Create a `.env.local` file in the superadmin directory:
 
 ```env
-BACKEND_URL=https://perl-backend-env.up.railway.app/
+BACKEND_URL=https://perl-backend-env.up.railway.app/api/
 BACKEND_API_KEY=your-api-key-here
 ```
 

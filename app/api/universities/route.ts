@@ -1,19 +1,17 @@
 // Universities API
 import { type NextRequest, NextResponse } from "next/server"
-import { getServerSession } from "next-auth"
-import { authOptions } from "../auth/[...nextauth]/route"
 
 export async function GET(request: NextRequest) {
   try {
-    // Get user session
-    const session = await getServerSession(authOptions)
-
-    if (!session?.accessToken) {
+    // Check authorization header
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
+    const accessToken = authHeader.substring(7)
 
     // Fetch data from backend API
-    const backendUrl = (process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || "https://perl-backend-env.up.railway.app").replace(/\/+$/, "")
+    const backendUrl = "https://perl-backend-env.up.railway.app"
     const url = new URL(request.url)
     const searchParams = url.searchParams
 
@@ -23,7 +21,7 @@ export async function GET(request: NextRequest) {
 
     const response = await fetch(apiUrl, {
       headers: {
-        'Authorization': `Bearer ${session.accessToken}`,
+        'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
     })
@@ -48,18 +46,17 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(universities)
   } catch (error) {
     console.error("Universities error:", error)
-    return NextResponse.json({ error: "Failed to fetch universities" }, { status: 500 })
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    // Get user session
-    const session = await getServerSession(authOptions)
-
-    if (!session?.accessToken) {
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
+    const accessToken = authHeader.substring(7)
 
     const body = await request.json()
 
@@ -76,11 +73,11 @@ export async function POST(request: NextRequest) {
     }
 
     // Send to backend API
-    const backendUrl = (process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || "https://perl-backend-env.up.railway.app").replace(/\/+$/, "")
+    const backendUrl = "https://perl-backend-env.up.railway.app"
     const response = await fetch(`${backendUrl}/api/universities`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${session.accessToken}`,
+        'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(backendData),
@@ -101,12 +98,11 @@ export async function POST(request: NextRequest) {
 
 export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
   try {
-    // Get user session
-    const session = await getServerSession(authOptions)
-
-    if (!session?.accessToken) {
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
+    const accessToken = authHeader.substring(7)
 
     const body = await request.json()
     const url = new URL(request.url)
@@ -125,11 +121,11 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     }
 
     // Send to backend API
-    const backendUrl = (process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || "https://perl-backend-env.up.railway.app").replace(/\/+$/, "")
+    const backendUrl = "https://perl-backend-env.up.railway.app"
     const response = await fetch(`${backendUrl}/api/universities/${id}`, {
       method: 'PUT',
       headers: {
-        'Authorization': `Bearer ${session.accessToken}`,
+        'Authorization': `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(backendData),
@@ -150,22 +146,21 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
 
 export async function DELETE(request: NextRequest) {
   try {
-    // Get user session
-    const session = await getServerSession(authOptions)
-
-    if (!session?.accessToken) {
+    const authHeader = request.headers.get('authorization')
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
+    const accessToken = authHeader.substring(7)
 
     const url = new URL(request.url)
     const id = url.pathname.split('/').pop() // Extract ID from URL
 
     // Send to backend API
-    const backendUrl = (process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || "https://perl-backend-env.up.railway.app").replace(/\/+$/, "")
+    const backendUrl = "https://perl-backend-env.up.railway.app"
     const response = await fetch(`${backendUrl}/api/universities/${id}`, {
       method: 'DELETE',
       headers: {
-        'Authorization': `Bearer ${session.accessToken}`,
+        'Authorization': `Bearer ${accessToken}`,
       },
     })
 

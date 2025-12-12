@@ -40,7 +40,7 @@ export default function UniversitiesPage() {
   const loadUniversities = async () => {
     try {
       setLoading(true)
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://perl-backend-env.up.railway.app/'
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://perl-backend-env.up.railway.app/api/'
       const response = await fetch(`${backendUrl}/api/universities`, {
         headers: {
           'Authorization': `Bearer ${session?.accessToken}`,

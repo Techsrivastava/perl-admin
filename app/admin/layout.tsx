@@ -1,9 +1,8 @@
 "use client"
 
 import type React from "react"
-import { useSession } from "next-auth/react"
 import { useRouter, usePathname } from "next/navigation"
-import { useEffect } from "react"
+import { useState, useEffect } from "react"
 import { Sidebar } from "@/components/admin/sidebar"
 import { Header } from "@/components/admin/header"
 import { NotificationCenter } from "@/components/admin/notification-center"
@@ -14,23 +13,38 @@ function AdminLayoutContent({
 }: {
   children: React.ReactNode
 }) {
-  const { data: session, status } = useSession()
+  const [user, setUser] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
   const router = useRouter()
   const pathname = usePathname()
 
   useEffect(() => {
-    if (status === "loading" || pathname === '/admin/login') return // Still loading or on login page
+    if (pathname === '/admin/login') {
+      setLoading(false)
+      return
+    }
 
-    if (!session || !session.user || (session.user.role !== 'superadmin' && session.user.role !== 'super_admin')) {
+    const token = localStorage.getItem('token')
+    const userData = localStorage.getItem('user')
+
+    if (token && userData) {
+      const parsedUser = JSON.parse(userData)
+      if (parsedUser.role === 'superadmin' || parsedUser.role === 'super_admin') {
+        setUser(parsedUser)
+      } else {
+        router.push('/admin/login')
+      }
+    } else {
       router.push('/admin/login')
     }
-  }, [session, status, router, pathname])
+    setLoading(false)
+  }, [router, pathname])
 
   if (pathname === '/admin/login') {
     return children
   }
 
-  if (status === "loading") {
+  if (loading) {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="text-center">
@@ -41,7 +55,7 @@ function AdminLayoutContent({
     )
   }
 
-  if (!session || !session.user || (session.user.role !== 'superadmin' && session.user.role !== 'super_admin')) {
+  if (!user) {
     return null
   }
 

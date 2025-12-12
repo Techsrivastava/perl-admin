@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import { signIn } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -24,20 +23,44 @@ export default function AdminLoginPage() {
     setIsLoading(true)
 
     try {
-      const result = await signIn("credentials", {
-        email,
-        password,
-        redirect: true,
-        callbackUrl: '/admin',
+      const response = await fetch('https://perl-backend-env.up.railway.app/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
       })
 
-      if (result?.error) {
-        setError("Invalid credentials. Please try again.")
+      const data = await response.json()
+
+      if (response.ok && data.success && data.data?.token) {
+        // Store token in localStorage
+        localStorage.setItem('token', data.data.token)
+
+        // Get user data
+        const meResponse = await fetch('https://perl-backend-env.up.railway.app/api/auth/me', {
+          headers: {
+            'Authorization': `Bearer ${data.data.token}`,
+          },
+        })
+
+        if (meResponse.ok) {
+          const meData = await meResponse.json()
+          localStorage.setItem('user', JSON.stringify(meData.data))
+          router.push('/admin')
+        } else {
+          setError('Failed to get user data')
+        }
       } else {
-        // Login successful - NextAuth will handle the redirect
+        // Handle specific backend errors
+        if (data.message && data.message.includes('secretOrPrivateKey')) {
+          setError('Server configuration error. Please contact support.')
+        } else {
+          setError(data.message || 'Invalid credentials. Please try again.')
+        }
       }
     } catch (error) {
-      setError("An error occurred. Please try again.")
+      setError('An error occurred. Please try again.')
     } finally {
       setIsLoading(false)
     }

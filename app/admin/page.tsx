@@ -48,7 +48,7 @@ export default function DashboardPage() {
 
     try {
       setRefreshing(true)
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://perl-backend-env.up.railway.app/'
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://perl-backend-env.up.railway.app/api/'
       const response = await fetch(`${backendUrl}/api/dashboard`, {
         headers: {
           'Authorization': `Bearer ${session.accessToken}`,

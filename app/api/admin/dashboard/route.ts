@@ -4,7 +4,7 @@ import { type NextRequest, NextResponse } from "next/server"
 export async function GET(request: NextRequest) {
   try {
     // Fetch data from backend API
-    const backendUrl = process.env.BACKEND_URL || 'https://perl-backend-env.up.railway.app/'
+    const backendUrl = 'https://perl-backend-env.up.railway.app'
     const response = await fetch(`${backendUrl}/api/dashboard`, {
       headers: {
         'Authorization': `Bearer ${process.env.BACKEND_API_KEY || 'your-api-key'}`,
