@@ -177,7 +177,7 @@ export default function CoursesPage() {
         },
       })
       
-      let uniMap = {}
+      let uniMap: Record<string, string> = {}
       if (uniResponse.ok) {
         const uniData = await uniResponse.json()
         const unis = uniData.data?.universities || uniData.universities || uniData || []
@@ -195,7 +195,7 @@ export default function CoursesPage() {
         const courseData = await courseResponse.json()
         const coursesData = courseData.success ? courseData.data : courseData
         const transformed = (Array.isArray(coursesData) ? coursesData : []).flatMap(course => 
-          course.universityIds?.map((uniId, index) => ({
+          course.universityIds?.map((uniId: string, index: number) => ({
             id: course.id * 100 + index,
             course_name: course.name,
             university_name: uniMap[uniId] || `University ${uniId}`,
