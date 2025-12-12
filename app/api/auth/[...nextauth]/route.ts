@@ -28,6 +28,7 @@ import { JWT } from "next-auth/jwt"
 import CredentialsProvider from "next-auth/providers/credentials"
 
 const authOptions: NextAuthOptions = {
+  secret: process.env.NEXTAUTH_SECRET,
   providers: [
     CredentialsProvider({
       name: "credentials",
@@ -40,13 +41,17 @@ const authOptions: NextAuthOptions = {
           return null
         }
 
+        if (!process.env.NEXTAUTH_SECRET) {
+          throw new Error("NEXTAUTH_SECRET is not set")
+        }
+
         try {
           // Create AbortController for timeout handling
           const controller = new AbortController()
           const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout
 
           // Call backend API for authentication
-          const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://perl-backend-env.up.railway.app/'
+          const backendUrl = (process.env.NEXT_PUBLIC_BACKEND_URL || process.env.BACKEND_URL || "https://perl-backend-env.up.railway.app").replace(/\/+$/, "")
           const response = await fetch(`${backendUrl}/api/auth/login`, {
             method: 'POST',
             headers: {

@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch data from backend API
-    const backendUrl = 'https://perl-backend-production.up.railway.app'
+    const backendUrl = (process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || "https://perl-backend-env.up.railway.app").replace(/\/+$/, "")
     const url = new URL(request.url)
     const searchParams = url.searchParams
 
@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Send to backend API
-    const backendUrl = 'https://perl-backend-production.up.railway.app'
+    const backendUrl = (process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || "https://perl-backend-env.up.railway.app").replace(/\/+$/, "")
     const response = await fetch(`${backendUrl}/api/payments`, {
       method: 'POST',
       headers: {
@@ -122,7 +122,7 @@ export async function PUT(request: NextRequest) {
     }
 
     // Send to backend API
-    const backendUrl = 'https://perl-backend-production.up.railway.app'
+    const backendUrl = (process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || "https://perl-backend-env.up.railway.app").replace(/\/+$/, "")
     const response = await fetch(`${backendUrl}/api/payments/${id}`, {
       method: 'PUT',
       headers: {
@@ -158,7 +158,7 @@ export async function DELETE(request: NextRequest) {
     const id = url.pathname.split('/').pop() // Extract ID from URL
 
     // Send to backend API
-    const backendUrl = 'https://perl-backend-production.up.railway.app'
+    const backendUrl = (process.env.BACKEND_URL || process.env.NEXT_PUBLIC_BACKEND_URL || "https://perl-backend-env.up.railway.app").replace(/\/+$/, "")
     const response = await fetch(`${backendUrl}/api/payments/${id}`, {
       method: 'DELETE',
       headers: {
