@@ -36,7 +36,7 @@ export default function AgentsPage() {
 
   const fetchAgents = async () => {
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000'
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://perl-backend-env.up.railway.app/'
       const response = await fetch(`${backendUrl}/api/agents`, {
         headers: {
           'Authorization': `Bearer ${session?.accessToken}`,
@@ -73,7 +73,7 @@ export default function AgentsPage() {
     if (!confirm("Are you sure you want to delete this agent?")) return
 
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000'
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://perl-backend-env.up.railway.app/'
       const response = await fetch(`${backendUrl}/api/agents/${id}`, {
         method: 'DELETE',
         headers: {

@@ -4,7 +4,7 @@ import { type NextRequest, NextResponse } from "next/server"
 export async function GET(request: NextRequest) {
   try {
     // Fetch data from backend API
-    const backendUrl = 'http://localhost:5000'
+    const backendUrl = 'https://perl-backend-env.up.railway.app/'
     const url = new URL(request.url)
     const searchParams = url.searchParams
 
@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
     const url = new URL(request.url)
     const action = url.searchParams.get('action')
 
-    const backendUrl = process.env.BACKEND_URL || 'http://localhost:5000'
+    const backendUrl = process.env.BACKEND_URL || 'https://perl-backend-env.up.railway.app/'
 
     if (action === 'adjust') {
       // Wallet adjustment

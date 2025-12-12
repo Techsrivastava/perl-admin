@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Send to backend API
-    const backendUrl = 'http://localhost:5000'
+    const backendUrl = 'https://perl-backend-env.up.railway.app/'
     const response = await fetch(`${backendUrl}/api/university-courses/map`, {
       method: 'POST',
       headers: {

@@ -45,7 +45,7 @@ export default function PaymentsPage() {
   const loadPayments = async () => {
     try {
       setLoading(true)
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:5000'
+      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://perl-backend-env.up.railway.app/'
       const response = await fetch(`${backendUrl}/api/payments`, {
         headers: {
           'Authorization': `Bearer ${session?.accessToken}`,
