@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import {
@@ -17,159 +18,215 @@ import {
   Pie,
   Cell,
 } from "recharts"
-import { Download, Filter } from "lucide-react"
+import { Download, Filter, TrendingUp, Users, Wallet, CreditCard, Loader2 } from "lucide-react"
+import { createClient } from "@/lib/supabase"
 
 export default function ReportsPage() {
-  const admissionData = [
-    { name: "Week 1", pending: 12, approved: 35, reverted: 2 },
-    { name: "Week 2", pending: 8, approved: 42, reverted: 3 },
-    { name: "Week 3", pending: 15, approved: 45, reverted: 1 },
-    { name: "Week 4", pending: 10, approved: 38, reverted: 4 },
-  ]
+  const [loading, setLoading] = useState(true)
+  const [stats, setStats] = useState({
+    totalAdmissions: 0,
+    activeAdmissions: 0,
+    totalRevenue: 0,
+    totalExpenses: 0,
+    netProfit: 0
+  })
+  const [admissionStatusData, setAdmissionStatusData] = useState<any[]>([])
+  const [expenseDistribution, setExpenseDistribution] = useState<any[]>([])
 
-  const financialData = [
-    { name: "Week 1", collected: 850000, paid: 620000, profit: 230000 },
-    { name: "Week 2", collected: 920000, paid: 680000, profit: 240000 },
-    { name: "Week 3", collected: 780000, paid: 590000, profit: 190000 },
-    { name: "Week 4", collected: 950000, paid: 710000, profit: 240000 },
-  ]
+  const supabase = createClient()
 
-  const expenseData = [
-    { name: "Office", value: 50000 },
-    { name: "Staff", value: 120000 },
-    { name: "Travel", value: 35000 },
-    { name: "Marketing", value: 95000 },
-    { name: "Misc", value: 20000 },
-  ]
+  useEffect(() => {
+    loadReportsData()
+  }, [])
 
-  const COLORS = ["#3b82f6", "#ef4444", "#10b981", "#f59e0b", "#8b5cf6"]
+  const loadReportsData = async () => {
+    try {
+      setLoading(true)
+
+      // 1. Fetch Admissions Summary
+      const { data: admData } = await supabase.from('admissions').select('status')
+      const admCount = admData?.length || 0
+      const activeAdm = admData?.filter(a => a.status === 'approved').length || 0
+
+      const statusMap = (admData || []).reduce((acc: any, curr) => {
+        acc[curr.status] = (acc[curr.status] || 0) + 1
+        return acc
+      }, {})
+
+      setAdmissionStatusData(Object.entries(statusMap).map(([name, value]) => ({ name, value })))
+
+      // 2. Fetch Financials (Revenue from Ledger)
+      const { data: revData } = await supabase.from('ledger').select('amount').eq('transaction_type', 'credit')
+      const totalRev = (revData || []).reduce((sum, r) => sum + r.amount, 0)
+
+      // 3. Fetch Expenses
+      const { data: expData } = await supabase.from('expenses').select('amount, category')
+      const totalExp = (expData || []).reduce((sum, e) => sum + e.amount, 0)
+
+      const expMap = (expData || []).reduce((acc: any, curr) => {
+        acc[curr.category] = (acc[curr.category] || 0) + curr.amount
+        return acc
+      }, {})
+
+      setExpenseDistribution(Object.entries(expMap).map(([name, value]) => ({ name, value })))
+
+      setStats({
+        totalAdmissions: admCount,
+        activeAdmissions: activeAdm,
+        totalRevenue: totalRev,
+        totalExpenses: totalExp,
+        netProfit: totalRev - totalExp
+      })
+
+    } catch (err: any) {
+      console.error("Reports error:", err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#6366f1"]
+
+  if (loading) return (
+    <div className="p-20 flex flex-col items-center justify-center opacity-50">
+      <Loader2 className="w-12 h-12 animate-spin text-primary mb-4" />
+      <p className="font-bold text-lg animate-pulse">Analyzing system data...</p>
+    </div>
+  )
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-8 space-y-8 animate-in fade-in duration-700">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Reports & Analytics</h1>
-        <div className="flex gap-2">
-          <Button variant="outline" className="gap-2 bg-transparent">
+        <div>
+          <h1 className="text-3xl font-bold font-heading">Business Intelligence</h1>
+          <p className="text-muted-foreground mt-1">Real-time performance and financial metrics</p>
+        </div>
+        <div className="flex gap-3">
+          <Button variant="outline" className="gap-2 bg-transparent border-muted">
             <Filter className="w-4 h-4" />
-            Filter
+            Time Range: All
           </Button>
-          <Button className="gap-2">
+          <Button className="gap-2 bg-primary shadow-lg shadow-primary/20">
             <Download className="w-4 h-4" />
-            Export All
+            Generate PDF
           </Button>
         </div>
       </div>
 
-      {/* Admission Trends */}
-      <Card className="p-6">
-        <h3 className="text-lg font-semibold mb-4">Admission Trends</h3>
-        <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={admissionData}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="name" />
-            <YAxis />
-            <Tooltip />
-            <Legend />
-            <Bar dataKey="pending" fill="#f59e0b" />
-            <Bar dataKey="approved" fill="#10b981" />
-            <Bar dataKey="reverted" fill="#ef4444" />
-          </BarChart>
-        </ResponsiveContainer>
-      </Card>
-
-      {/* Financial Performance */}
-      <Card className="p-6">
-        <h3 className="text-lg font-semibold mb-4">Financial Performance</h3>
-        <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={financialData}>
-            <CartesianGrid strokeDasharray="3 3" />
-            <XAxis dataKey="name" />
-            <YAxis />
-            <Tooltip formatter={(value) => `₹${(value / 100000).toFixed(1)}L`} />
-            <Legend />
-            <Line type="monotone" dataKey="collected" stroke="#10b981" name="Collected" />
-            <Line type="monotone" dataKey="paid" stroke="#ef4444" name="Paid" />
-            <Line type="monotone" dataKey="profit" stroke="#3b82f6" name="Profit" />
-          </LineChart>
-        </ResponsiveContainer>
-      </Card>
-
-      {/* Expense Breakdown */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="p-6">
-          <h3 className="text-lg font-semibold mb-4">Expense Distribution</h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <PieChart>
-              <Pie
-                data={expenseData}
-                cx="50%"
-                cy="50%"
-                labelLine={false}
-                label={({ name, value }) => `${name}: ₹${(value / 1000).toFixed(0)}K`}
-                outerRadius={100}
-                fill="#8884d8"
-                dataKey="value"
-              >
-                {COLORS.map((color, index) => (
-                  <Cell key={`cell-${index}`} fill={color} />
-                ))}
-              </Pie>
-              <Tooltip formatter={(value) => `₹${(value / 1000).toFixed(0)}K`} />
-            </PieChart>
-          </ResponsiveContainer>
+      {/* KPI Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <Card className="p-6 border-none shadow-sm bg-blue-50/50">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-xs font-bold text-blue-600 uppercase tracking-widest mb-1">Total Admissions</p>
+              <p className="text-3xl font-black text-blue-900">{stats.totalAdmissions}</p>
+            </div>
+            <Users className="w-5 h-5 text-blue-400" />
+          </div>
         </Card>
-
-        <Card className="p-6">
-          <h3 className="text-lg font-semibold mb-4">Summary Stats</h3>
-          <div className="space-y-4">
-            <div className="p-4 border border-border rounded-lg">
-              <p className="text-sm text-muted-foreground mb-1">Total Admissions</p>
-              <p className="text-2xl font-bold">380</p>
+        <Card className="p-6 border-none shadow-sm bg-green-50/50">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-xs font-bold text-green-600 uppercase tracking-widest mb-1">Gross Revenue</p>
+              <p className="text-3xl font-black text-green-900">₹{stats.totalRevenue.toLocaleString()}</p>
             </div>
-            <div className="p-4 border border-border rounded-lg">
-              <p className="text-sm text-muted-foreground mb-1">Total Revenue</p>
-              <p className="text-2xl font-bold">₹45L</p>
+            <Wallet className="w-5 h-5 text-green-400" />
+          </div>
+        </Card>
+        <Card className="p-6 border-none shadow-sm bg-red-50/50">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-xs font-bold text-red-600 uppercase tracking-widest mb-1">Total Expenses</p>
+              <p className="text-3xl font-black text-red-900">₹{stats.totalExpenses.toLocaleString()}</p>
             </div>
-            <div className="p-4 border border-border rounded-lg">
-              <p className="text-sm text-muted-foreground mb-1">Total Expenses</p>
-              <p className="text-2xl font-bold">₹3.2L</p>
+            <CreditCard className="w-5 h-5 text-red-400" />
+          </div>
+        </Card>
+        <Card className="p-6 border-none shadow-xl bg-primary text-white">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-xs font-bold opacity-70 uppercase tracking-widest mb-1">Net System Profit</p>
+              <p className="text-3xl font-black">₹{stats.netProfit.toLocaleString()}</p>
             </div>
-            <div className="p-4 border border-border rounded-lg bg-green-50">
-              <p className="text-sm text-muted-foreground mb-1">Net Profit</p>
-              <p className="text-2xl font-bold text-green-600">₹10.5L</p>
-            </div>
+            <TrendingUp className="w-5 h-5 opacity-40" />
           </div>
         </Card>
       </div>
 
-      {/* Report Generation */}
-      <Card className="p-6">
-        <h3 className="text-lg font-semibold mb-4">Generate Reports</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <Button variant="outline" className="h-auto py-4 flex-col gap-2 bg-transparent">
-            <Download className="w-5 h-5" />
-            <span>Admission Report</span>
-          </Button>
-          <Button variant="outline" className="h-auto py-4 flex-col gap-2 bg-transparent">
-            <Download className="w-5 h-5" />
-            <span>Financial Report</span>
-          </Button>
-          <Button variant="outline" className="h-auto py-4 flex-col gap-2 bg-transparent">
-            <Download className="w-5 h-5" />
-            <span>Ledger Report</span>
-          </Button>
-          <Button variant="outline" className="h-auto py-4 flex-col gap-2 bg-transparent">
-            <Download className="w-5 h-5" />
-            <span>Expense Report</span>
-          </Button>
-          <Button variant="outline" className="h-auto py-4 flex-col gap-2 bg-transparent">
-            <Download className="w-5 h-5" />
-            <span>University Summary</span>
-          </Button>
-          <Button variant="outline" className="h-auto py-4 flex-col gap-2 bg-transparent">
-            <Download className="w-5 h-5" />
-            <span>Commission Report</span>
-          </Button>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        {/* Admission Distribution */}
+        <Card className="p-6 border-none shadow-md">
+          <h3 className="text-lg font-bold font-heading mb-6">Admission Pipeline Status</h3>
+          <div className="h-[300px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={admissionStatusData}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={12} className="capitalize" />
+                <YAxis axisLine={false} tickLine={false} fontSize={12} />
+                <Tooltip cursor={{ fill: '#f8fafc' }} contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }} />
+                <Bar
+                  dataKey="value"
+                  fill="#3b82f6"
+                  radius={[4, 4, 0, 0]}
+                  barSize={40}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+
+        {/* Expense Distribution */}
+        <Card className="p-6 border-none shadow-md">
+          <h3 className="text-lg font-bold font-heading mb-6">Expense Weightage</h3>
+          <div className="h-[300px] flex items-center">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={expenseDistribution}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={60}
+                  outerRadius={100}
+                  paddingAngle={5}
+                  dataKey="value"
+                >
+                  {expenseDistribution.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+                <Tooltip
+                  formatter={(value) => `₹${value.toLocaleString()}`}
+                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                />
+                <Legend verticalAlign="middle" align="right" layout="vertical" iconType="circle" />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+      </div>
+
+      {/* Reports Actions */}
+      <Card className="p-10 border-none shadow-md bg-slate-900 text-white relative overflow-hidden">
+        <div className="absolute right-0 top-0 w-64 h-64 bg-primary/20 blur-[100px] -z-0" />
+        <div className="relative z-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div>
+            <h4 className="text-2xl font-bold font-heading mb-2">Audit Central</h4>
+            <p className="text-sm text-slate-400">Generate certified reports for financial reconciliation and university audits.</p>
+          </div>
+          <div className="lg:col-span-3 grid grid-cols-2 lg:grid-cols-4 gap-4">
+            {[
+              'Admission Master List',
+              'Ledger Audit Trial',
+              'Entity Wallet Export',
+              'Commission Summary',
+              'Expense Register',
+              'Tax Statement'
+            ].map((name) => (
+              <Button key={name} variant="outline" className="bg-white/5 border-white/10 hover:bg-white/10 text-white text-xs h-12 justify-start truncate">
+                <Download className="w-3 h-3 mr-2" /> {name}
+              </Button>
+            ))}
+          </div>
         </div>
       </Card>
     </div>

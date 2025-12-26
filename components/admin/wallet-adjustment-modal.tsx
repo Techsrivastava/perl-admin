@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -8,8 +8,9 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Wallet, AlertTriangle, TrendingUp, TrendingDown } from "lucide-react"
+import { Wallet, AlertTriangle, TrendingUp, TrendingDown, RefreshCcw, Loader2 } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
+import { createClient } from "@/lib/supabase"
 
 interface WalletAdjustmentModalProps {
   onSuccess?: () => void
@@ -21,265 +22,239 @@ export function WalletAdjustmentModal({ onSuccess }: WalletAdjustmentModalProps)
     wallet_owner_id: "",
     direction: "credit",
     amount: "",
-    reason: "",
+    purpose: "topup",
     notes: "",
-    proof_attachment: null as File | null,
   })
 
   const [loading, setLoading] = useState(false)
+  const [fetching, setFetching] = useState(false)
+  const [owners, setOwners] = useState<any[]>([])
   const [selectedWallet, setSelectedWallet] = useState<any>(null)
 
-  // Mock wallet data
-  const wallets = {
-    consultancy: [
-      { id: "CNS001", name: "Global Education Consultants", balance: 450000 },
-      { id: "CNS002", name: "Future Path Consultancy", balance: 320000 },
-    ],
-    university: [
-      { id: "UNI001", name: "Delhi University", balance: 2500000 },
-      { id: "UNI002", name: "Mumbai University", balance: 1800000 },
-    ],
-    agent: [
-      { id: "AGT001", name: "Rajesh Kumar (Agent)", balance: 45000 },
-      { id: "AGT002", name: "Priya Singh (Agent)", balance: 32000 },
-    ],
-  }
+  const supabase = createClient()
 
-  const handleWalletTypeChange = (type: string) => {
-    setFormData({ ...formData, wallet_owner_type: type, wallet_owner_id: "" })
-    setSelectedWallet(null)
+  useEffect(() => {
+    if (formData.wallet_owner_type) {
+      loadOwners()
+    }
+  }, [formData.wallet_owner_type])
+
+  const loadOwners = async () => {
+    try {
+      setFetching(true)
+      let query = supabase.from(
+        formData.wallet_owner_type === 'university' ? 'universities' :
+          formData.wallet_owner_type === 'consultancy' ? 'consultancies' : 'agents'
+      ).select('id, name, wallet_balance')
+
+      const { data, error } = await query
+      if (error) throw error
+      setOwners(data || [])
+    } catch (err: any) {
+      console.error("Error loading owners:", err)
+    } finally {
+      setFetching(false)
+    }
   }
 
   const handleWalletSelect = (id: string) => {
-    const allWallets = [...wallets.consultancy, ...wallets.university, ...wallets.agent]
-    const wallet = allWallets.find(w => w.id === id)
-    setSelectedWallet(wallet)
+    const owner = owners.find(o => o.id === id)
+    setSelectedWallet(owner)
     setFormData({ ...formData, wallet_owner_id: id })
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!formData.wallet_owner_id || !formData.amount || !formData.notes) return
     setLoading(true)
 
     try {
-      const response = await fetch("/api/wallets/adjust", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+      // 1. Create Ledger Entry (Trigger handles update_wallet)
+      const { error } = await supabase.from('ledger').insert({
+        entity_id: formData.wallet_owner_id,
+        entity_type: formData.wallet_owner_type,
+        transaction_type: formData.direction,
+        amount: parseFloat(formData.amount),
+        purpose: formData.purpose,
+        description: `Manual Adjustment: ${formData.notes}`,
+        reference_type: 'manual_adjustment'
       })
 
-      if (response.ok) {
-        onSuccess?.()
-      }
-    } catch (error) {
+      if (error) throw error
+
+      alert('Wallet adjusted successfully!')
+      onSuccess?.()
+    } catch (error: any) {
       console.error("Failed to adjust wallet:", error)
+      alert("Error: " + error.message)
     } finally {
       setLoading(false)
     }
   }
 
-  const newBalance = selectedWallet && formData.amount
-    ? formData.direction === "credit"
-      ? selectedWallet.balance + Number(formData.amount)
-      : selectedWallet.balance - Number(formData.amount)
-    : null
-
-  const isDebitValid = formData.direction === "debit" && selectedWallet && formData.amount
-    ? Number(formData.amount) <= selectedWallet.balance
-    : true
-
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 max-h-[70vh] overflow-y-auto px-1">
-      {/* Header */}
-      <div>
-        <h3 className="text-lg font-semibold mb-2 flex items-center gap-2">
-          <Wallet className="w-5 h-5 text-primary" />
-          Wallet Adjustment / Top-up
-        </h3>
-        <p className="text-sm text-muted-foreground">
-          Manually credit or debit wallet balance (Requires Super Admin permission)
-        </p>
-      </div>
-
-      {/* Warning */}
-      <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded">
-        <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+    <form onSubmit={handleSubmit} className="p-1 space-y-8 animate-in fade-in zoom-in-95">
+      <div className="flex items-start gap-4 p-4 bg-amber-50 border border-amber-200 rounded-2xl">
+        <AlertTriangle className="w-6 h-6 text-amber-600 mt-1 shrink-0" />
         <div className="text-sm">
-          <p className="font-semibold text-amber-900">High-Risk Operation</p>
-          <p className="text-amber-700">
-            This action will directly affect wallet balances. All adjustments are logged and audited. 
-            Provide clear reason and attach proof if available.
+          <p className="font-bold text-amber-900 leading-tight">Privileged Action Required</p>
+          <p className="text-amber-700 mt-1 text-xs opacity-80">
+            Manual adjustments bypass standard billing flows. All entries are non-reversible and recorded for audit.
           </p>
         </div>
       </div>
 
-      {/* Wallet Selection */}
-      <Card className="p-4">
-        <h4 className="font-semibold mb-4">Select Wallet</h4>
-        <div className="space-y-3">
-          <div>
-            <Label htmlFor="wallet_type">Wallet Owner Type *</Label>
-            <Select value={formData.wallet_owner_type} onValueChange={handleWalletTypeChange}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select wallet type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="consultancy">Consultancy</SelectItem>
-                <SelectItem value="university">University</SelectItem>
-                <SelectItem value="agent">Agent</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        {/* Step 1: Target Selector */}
+        <div className="space-y-6">
+          <div className="space-y-4">
+            <h4 className="text-xs font-black text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+              <div className="w-1 h-1 bg-primary rounded-full" />
+              Select Destination
+            </h4>
 
-          {formData.wallet_owner_type && (
-            <div>
-              <Label htmlFor="wallet_owner">Select Wallet *</Label>
-              <Select value={formData.wallet_owner_id} onValueChange={handleWalletSelect}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select wallet" />
+            <div className="space-y-3">
+              <Label className="font-bold text-sm">Target Entity Type</Label>
+              <div className="grid grid-cols-3 gap-2">
+                {['university', 'consultancy', 'agent'].map((type) => (
+                  <Button
+                    key={type}
+                    type="button"
+                    variant={formData.wallet_owner_type === type ? 'default' : 'outline'}
+                    className="capitalize text-xs font-bold h-10"
+                    onClick={() => {
+                      setFormData({ ...formData, wallet_owner_type: type, wallet_owner_id: '' });
+                      setSelectedWallet(null);
+                    }}
+                  >
+                    {type}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            {formData.wallet_owner_type && (
+              <div className="space-y-3 animate-in slide-in-from-top-2">
+                <Label className="font-bold text-sm">Select {formData.wallet_owner_type}</Label>
+                <Select value={formData.wallet_owner_id} onValueChange={handleWalletSelect}>
+                  <SelectTrigger className="h-12 bg-muted/20 border-muted">
+                    <SelectValue placeholder={`Search ${formData.wallet_owner_type}...`} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {fetching ? (
+                      <div className="p-4 text-center"><Loader2 className="w-5 h-5 animate-spin mx-auto" /></div>
+                    ) : owners.map(o => (
+                      <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {selectedWallet && (
+              <Card className="p-5 bg-primary/5 border-primary/10 rounded-2xl">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 bg-white rounded-xl shadow-sm">
+                    <Wallet className="w-6 h-6 text-primary" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black uppercase text-muted-foreground tracking-widest">Active Balance</p>
+                    <p className="text-2xl font-black text-primary">₹{selectedWallet.wallet_balance?.toLocaleString() || 0}</p>
+                  </div>
+                </div>
+              </Card>
+            )}
+          </div>
+        </div>
+
+        {/* Step 2: Configuration */}
+        <div className="space-y-6 border-l pl-8 border-muted">
+          <h4 className="text-xs font-black text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+            <div className="w-1 h-1 bg-primary rounded-full" />
+            Configuration
+          </h4>
+
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label className="font-bold text-sm">Action Type</Label>
+                <div className="flex p-1 bg-muted rounded-lg gap-1">
+                  <Button
+                    type="button"
+                    className={`flex-1 h-9 text-xs font-bold transition-all ${formData.direction === 'credit' ? 'bg-white text-green-600 shadow-sm' : 'bg-transparent text-muted-foreground hover:text-black'}`}
+                    onClick={() => setFormData({ ...formData, direction: 'credit' })}
+                  >
+                    <TrendingUp className="w-3 h-3 mr-1" /> Credit
+                  </Button>
+                  <Button
+                    type="button"
+                    className={`flex-1 h-9 text-xs font-bold transition-all ${formData.direction === 'debit' ? 'bg-white text-red-600 shadow-sm' : 'bg-transparent text-muted-foreground hover:text-black'}`}
+                    onClick={() => setFormData({ ...formData, direction: 'debit' })}
+                  >
+                    <TrendingDown className="w-3 h-3 mr-1" /> Debit
+                  </Button>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label className="font-bold text-sm">Amount (₹)</Label>
+                <Input
+                  type="number"
+                  className="h-11 bg-muted/20 border-muted font-bold"
+                  value={formData.amount}
+                  placeholder="0.00"
+                  onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="font-bold text-sm">Adjustment Purpose</Label>
+              <Select value={formData.purpose} onValueChange={(v) => setFormData({ ...formData, purpose: v })}>
+                <SelectTrigger className="h-11 bg-muted/20 border-muted">
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {wallets[formData.wallet_owner_type as keyof typeof wallets]?.map((wallet) => (
-                    <SelectItem key={wallet.id} value={wallet.id}>
-                      {wallet.name} - Current Balance: ₹{wallet.balance.toLocaleString()}
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="topup">Manual Topup / Wallet Loading</SelectItem>
+                  <SelectItem value="refund">Student Refund Processing</SelectItem>
+                  <SelectItem value="correction">Balance Discrepancy Correction</SelectItem>
+                  <SelectItem value="bonus">Performance Bonus / Incentive</SelectItem>
+                  <SelectItem value="penalty">Penalty / Fine Recovery</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-          )}
 
-          {selectedWallet && (
-            <div className="p-3 bg-muted rounded">
-              <p className="text-sm font-semibold mb-1">{selectedWallet.name}</p>
-              <p className="text-lg font-bold text-primary">
-                Current Balance: ₹{selectedWallet.balance.toLocaleString()}
-              </p>
+            <div className="space-y-2">
+              <Label className="font-bold text-sm">Audit Narrative *</Label>
+              <Textarea
+                className="bg-muted/20 border-muted text-sm"
+                rows={3}
+                placeholder="Explain the necessity of this adjustment for manual audit logs..."
+                value={formData.notes}
+                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+              />
             </div>
-          )}
-        </div>
-      </Card>
-
-      {/* Adjustment Details */}
-      <Card className="p-4">
-        <h4 className="font-semibold mb-4">Adjustment Details</h4>
-        <div className="space-y-4">
-          <div>
-            <Label htmlFor="direction">Direction *</Label>
-            <Select value={formData.direction} onValueChange={(value) => setFormData({ ...formData, direction: value })}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="credit">
-                  <div className="flex items-center gap-2">
-                    <TrendingUp className="w-4 h-4 text-green-600" />
-                    <span>Credit (Add Money)</span>
-                  </div>
-                </SelectItem>
-                <SelectItem value="debit">
-                  <div className="flex items-center gap-2">
-                    <TrendingDown className="w-4 h-4 text-red-600" />
-                    <span>Debit (Deduct Money)</span>
-                  </div>
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div>
-            <Label htmlFor="amount">Amount (₹) *</Label>
-            <Input
-              id="amount"
-              type="number"
-              min="1"
-              value={formData.amount}
-              onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-              placeholder="e.g., 50000"
-              required
-            />
-            {!isDebitValid && (
-              <p className="text-xs text-red-600 mt-1">
-                Insufficient balance. Available: ₹{selectedWallet?.balance.toLocaleString()}
-              </p>
-            )}
-          </div>
-
-          {newBalance !== null && isDebitValid && (
-            <div className={`p-3 rounded border ${
-              formData.direction === "credit" ? "bg-green-50 border-green-200" : "bg-orange-50 border-orange-200"
-            }`}>
-              <p className="text-sm font-semibold mb-1">
-                {formData.direction === "credit" ? "New Balance After Credit:" : "New Balance After Debit:"}
-              </p>
-              <p className="text-lg font-bold">₹{newBalance.toLocaleString()}</p>
-            </div>
-          )}
-
-          <Separator />
-
-          <div>
-            <Label htmlFor="reason">Reason for Adjustment *</Label>
-            <Select value={formData.reason} onValueChange={(value) => setFormData({ ...formData, reason: value })}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select reason" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="refund">Refund</SelectItem>
-                <SelectItem value="correction">Balance Correction</SelectItem>
-                <SelectItem value="topup">Manual Top-up</SelectItem>
-                <SelectItem value="penalty">Penalty / Deduction</SelectItem>
-                <SelectItem value="bonus">Bonus / Incentive</SelectItem>
-                <SelectItem value="settlement">Settlement</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div>
-            <Label htmlFor="notes">Detailed Notes *</Label>
-            <Textarea
-              id="notes"
-              value={formData.notes}
-              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-              placeholder="Provide detailed explanation for this adjustment (Required for audit trail)"
-              rows={3}
-              required
-            />
-          </div>
-
-          <div>
-            <Label htmlFor="proof">Attach Proof (Optional)</Label>
-            <Input
-              id="proof"
-              type="file"
-              accept=".pdf,.jpg,.jpeg,.png"
-              onChange={(e) => setFormData({ ...formData, proof_attachment: e.target.files?.[0] || null })}
-            />
-            <p className="text-xs text-muted-foreground mt-1">
-              Upload supporting document or approval letter
-            </p>
           </div>
         </div>
-      </Card>
-
-      {/* Audit Info */}
-      <div className="text-xs text-muted-foreground p-3 bg-muted/50 rounded">
-        <p><strong>Audit Trail:</strong> This adjustment will be logged with timestamp, admin user ID, wallet details, and all entered information.</p>
       </div>
 
-      {/* Footer */}
-      <div className="flex gap-3">
-        <Button type="button" variant="outline" className="flex-1" onClick={() => onSuccess?.()}>
-          Cancel
-        </Button>
-        <Button 
-          type="submit" 
-          className="flex-1" 
-          disabled={loading || !selectedWallet || !formData.amount || !isDebitValid}
-        >
-          {loading ? "Processing..." : "Confirm Adjustment"}
-        </Button>
+      <Separator />
+
+      <div className="flex items-center justify-between pt-2">
+        <div className="flex items-center gap-2 text-muted-foreground">
+          <RefreshCcw className="w-4 h-4" />
+          <span className="text-xs font-medium italic">Changes will reflect instantly across all reports.</span>
+        </div>
+        <div className="flex gap-3">
+          <Button type="button" variant="ghost" className="font-bold" onClick={() => onSuccess?.()}>Discard</Button>
+          <Button
+            type="submit"
+            className={`font-black px-8 h-12 shadow-lg ${formData.direction === 'credit' ? 'bg-green-600 hover:bg-green-700 shadow-green-600/20' : 'bg-red-600 hover:bg-red-700 shadow-red-600/20'}`}
+            disabled={loading || !formData.wallet_owner_id || !formData.amount}
+          >
+            {loading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+            Confirm & Commit
+          </Button>
+        </div>
       </div>
     </form>
   )

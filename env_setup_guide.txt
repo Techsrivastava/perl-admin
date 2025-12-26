@@ -1,0 +1,5 @@
+
+IMPORTANT: You must rename this file to '.env.local' in the root of the 'superadmin' directory for the database connection to work.
+
+NEXT_PUBLIC_SUPABASE_URL=https://qsstqmwaayulyfnjwoom.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFzc3RxbXdhYXl1bHlmbmp3b29tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY1NTE1OTMsImV4cCI6MjA4MjEyNzU5M30.biwt-8hEKL0JG6OmFr4GhEdsIEn9Ei8ub0882XwJgPg

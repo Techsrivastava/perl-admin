@@ -88,7 +88,7 @@ export interface Admission {
   consultancy_id: number
   agent_id: number
   total_fee: number
-  fee_received: number
+  fee_paid: number
   fee_pending: number
   university_fee: number
   consultancy_profit: number

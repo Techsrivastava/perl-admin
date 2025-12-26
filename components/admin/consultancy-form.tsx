@@ -1,18 +1,19 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
+import { createClient } from "@/lib/supabase"
 
 interface ConsultancyFormProps {
   onSuccess?: () => void
 }
 
 export function ConsultancyForm({ onSuccess }: ConsultancyFormProps) {
+  const [loading, setLoading] = useState(false)
   const [formData, setFormData] = useState({
     name: "",
     owner_name: "",
@@ -36,35 +37,62 @@ export function ConsultancyForm({ onSuccess }: ConsultancyFormProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setLoading(true)
+
     try {
-      const response = await fetch("/api/consultancies", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
-      })
-      if (response.ok) {
-        onSuccess?.()
-        setFormData({
-          name: "",
-          owner_name: "",
-          registration_number: "",
-          contact_email: "",
-          contact_phone: "",
-          address: "",
-          city: "",
-          state: "",
-          country: "",
-          bank_name: "",
-          bank_account_number: "",
-          bank_ifsc: "",
-          bank_branch: "",
-          account_holder_name: "",
-          gst_number: "",
-          pan_number: "",
-        })
+      const supabase = createClient()
+
+      const insertData = {
+        name: formData.name,
+        owner_name: formData.owner_name,
+        registration_no: formData.registration_number,
+        contact_email: formData.contact_email,
+        contact_phone: formData.contact_phone,
+        address: `${formData.address}, ${formData.city}, ${formData.state}`,
+        status: 'approved',
+        bank_details: {
+          bank_name: formData.bank_name,
+          account_number: formData.bank_account_number,
+          ifsc_code: formData.bank_ifsc,
+          branch: formData.bank_branch,
+          holder_name: formData.account_holder_name,
+          gst_number: formData.gst_number,
+          pan_number: formData.pan_number
+        },
+        wallet_balance: 0.00
       }
-    } catch (error) {
+
+      const { error } = await supabase
+        .from('consultancies')
+        .insert(insertData)
+
+      if (error) throw error
+
+      onSuccess?.()
+
+      setFormData({
+        name: "",
+        owner_name: "",
+        registration_number: "",
+        contact_email: "",
+        contact_phone: "",
+        address: "",
+        city: "",
+        state: "",
+        country: "",
+        bank_name: "",
+        bank_account_number: "",
+        bank_ifsc: "",
+        bank_branch: "",
+        account_holder_name: "",
+        gst_number: "",
+        pan_number: "",
+      })
+    } catch (error: any) {
       console.error("Failed to add consultancy:", error)
+      alert(`Failed to add consultancy: ${error.message}`)
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -74,91 +102,91 @@ export function ConsultancyForm({ onSuccess }: ConsultancyFormProps) {
       <div className="space-y-4">
         <h3 className="text-lg font-semibold">Basic Information</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <Label htmlFor="name">Consultancy Name *</Label>
-          <Input
-            id="name"
-            placeholder="e.g., Global Education Consultants"
-            value={formData.name}
-            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-            required
-          />
-        </div>
+          <div>
+            <Label htmlFor="name">Consultancy Name *</Label>
+            <Input
+              id="name"
+              placeholder="e.g., Global Education Consultants"
+              value={formData.name}
+              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              required
+            />
+          </div>
 
-        <div>
-          <Label htmlFor="owner_name">Owner Name *</Label>
-          <Input
-            id="owner_name"
-            placeholder="Full name"
-            value={formData.owner_name}
-            onChange={(e) => setFormData({ ...formData, owner_name: e.target.value })}
-            required
-          />
-        </div>
+          <div>
+            <Label htmlFor="owner_name">Owner Name *</Label>
+            <Input
+              id="owner_name"
+              placeholder="Full name"
+              value={formData.owner_name}
+              onChange={(e) => setFormData({ ...formData, owner_name: e.target.value })}
+              required
+            />
+          </div>
 
-        <div>
-          <Label htmlFor="registration_number">Registration Number *</Label>
-          <Input
-            id="registration_number"
-            placeholder="e.g., REG-2024-001"
-            value={formData.registration_number}
-            onChange={(e) => setFormData({ ...formData, registration_number: e.target.value })}
-            required
-          />
-        </div>
+          <div>
+            <Label htmlFor="registration_number">Registration Number *</Label>
+            <Input
+              id="registration_number"
+              placeholder="e.g., REG-2024-001"
+              value={formData.registration_number}
+              onChange={(e) => setFormData({ ...formData, registration_number: e.target.value })}
+              required
+            />
+          </div>
 
-        <div>
-          <Label htmlFor="contact_email">Email *</Label>
-          <Input
-            id="contact_email"
-            type="email"
-            placeholder="email@consultancy.com"
-            value={formData.contact_email}
-            onChange={(e) => setFormData({ ...formData, contact_email: e.target.value })}
-            required
-          />
-        </div>
+          <div>
+            <Label htmlFor="contact_email">Email *</Label>
+            <Input
+              id="contact_email"
+              type="email"
+              placeholder="email@consultancy.com"
+              value={formData.contact_email}
+              onChange={(e) => setFormData({ ...formData, contact_email: e.target.value })}
+              required
+            />
+          </div>
 
-        <div>
-          <Label htmlFor="contact_phone">Phone *</Label>
-          <Input
-            id="contact_phone"
-            placeholder="+91-9876543210"
-            value={formData.contact_phone}
-            onChange={(e) => setFormData({ ...formData, contact_phone: e.target.value })}
-            required
-          />
-        </div>
+          <div>
+            <Label htmlFor="contact_phone">Phone *</Label>
+            <Input
+              id="contact_phone"
+              placeholder="+91-9876543210"
+              value={formData.contact_phone}
+              onChange={(e) => setFormData({ ...formData, contact_phone: e.target.value })}
+              required
+            />
+          </div>
 
-        <div>
-          <Label htmlFor="city">City</Label>
-          <Input
-            id="city"
-            placeholder="City name"
-            value={formData.city}
-            onChange={(e) => setFormData({ ...formData, city: e.target.value })}
-          />
-        </div>
+          <div>
+            <Label htmlFor="city">City</Label>
+            <Input
+              id="city"
+              placeholder="City name"
+              value={formData.city}
+              onChange={(e) => setFormData({ ...formData, city: e.target.value })}
+            />
+          </div>
 
-        <div>
-          <Label htmlFor="state">State</Label>
-          <Input
-            id="state"
-            placeholder="State name"
-            value={formData.state}
-            onChange={(e) => setFormData({ ...formData, state: e.target.value })}
-          />
-        </div>
+          <div>
+            <Label htmlFor="state">State</Label>
+            <Input
+              id="state"
+              placeholder="State name"
+              value={formData.state}
+              onChange={(e) => setFormData({ ...formData, state: e.target.value })}
+            />
+          </div>
 
-        <div>
-          <Label htmlFor="country">Country</Label>
-          <Input
-            id="country"
-            placeholder="Country name"
-            value={formData.country}
-            onChange={(e) => setFormData({ ...formData, country: e.target.value })}
-          />
-        </div>
+          <div>
+            <Label htmlFor="country">Country</Label>
+            <Input
+              id="country"
+              placeholder="Country name"
+              value={formData.country}
+              onChange={(e) => setFormData({ ...formData, country: e.target.value })}
+            />
+          </div>
         </div>
 
         <div>
@@ -257,8 +285,8 @@ export function ConsultancyForm({ onSuccess }: ConsultancyFormProps) {
         </div>
       </div>
 
-      <Button type="submit" className="w-full">
-        Create Consultancy
+      <Button type="submit" disabled={loading} className="w-full">
+        {loading ? "Creating..." : "Create Consultancy"}
       </Button>
     </form>
   )

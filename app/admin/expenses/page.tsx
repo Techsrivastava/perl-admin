@@ -1,91 +1,50 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useSession } from "next-auth/react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Plus, Download, Trash2, Edit2 } from "lucide-react"
+import { Plus, Download, Trash2, Edit2, Receipt, PieChart, Loader2, ArrowUpRight } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import { ExpenseManagementModal } from "@/components/admin/expense-management-modal"
-
-interface Expense {
-  id: number
-  category: string
-  amount: number
-  description: string
-  date: string
-  approver: string
-  receipt: string
-}
+import { createClient } from "@/lib/supabase"
+import { Badge } from "@/components/ui/badge"
 
 export default function ExpensesPage() {
-  const { data: session } = useSession()
   const [expenseDialogOpen, setExpenseDialogOpen] = useState(false)
-  const [expenses, setExpenses] = useState<Expense[]>([])
+  const [expenses, setExpenses] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Load expenses data on component mount
+  const supabase = createClient()
+
   useEffect(() => {
-    if (session?.accessToken) {
-      loadExpenses()
-    }
-  }, [session])
+    loadExpenses()
+  }, [])
 
   const loadExpenses = async () => {
     try {
       setLoading(true)
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://perl-backend-env.up.railway.app/api/'
-      const response = await fetch(`${backendUrl}/api/expenses`, {
-        headers: {
-          'Authorization': `Bearer ${session?.accessToken}`,
-        },
-      })
-      if (response.ok) {
-        const data = await response.json()
-        // Assuming backend returns data directly or wrapped in success response
-        const expensesData = data.success ? data.data : data
-        setExpenses(expensesData)
-      } else {
-        setError('Failed to load expenses')
-      }
-    } catch (error) {
+      const { data, error } = await supabase
+        .from('expenses')
+        .select('*')
+        .order('date', { ascending: false })
+
+      if (error) throw error
+      setExpenses(data || [])
+    } catch (error: any) {
       console.error('Error loading expenses:', error)
-      setError('Failed to load expenses')
+      setError(error.message)
     } finally {
       setLoading(false)
     }
   }
 
-  const [newExpense, setNewExpense] = useState({
-    category: "Office",
-    amount: "",
-    description: "",
-    approver: "Admin",
-  })
-
-  const handleAddExpense = () => {
-    if (newExpense.amount && newExpense.description) {
-      const expense: Expense = {
-        id: Math.max(...expenses.map((e) => e.id), 0) + 1,
-        category: newExpense.category,
-        amount: Number.parseInt(newExpense.amount),
-        description: newExpense.description,
-        date: new Date().toISOString().split("T")[0],
-        approver: newExpense.approver,
-        receipt: `RCP-${String(Math.max(...expenses.map((e) => Number.parseInt(e.receipt.split("-")[1])), 0) + 1).padStart(3, "0")}`,
-      }
-      setExpenses([...expenses, expense])
-      setNewExpense({ category: "Office", amount: "", description: "", approver: "Admin" })
-    }
-  }
-
-  const handleDeleteExpense = (id: number) => {
-    setExpenses(expenses.filter((e) => e.id !== id))
+  const handleDeleteExpense = async (id: string) => {
+    if (!confirm("Are you sure?")) return
+    const { error } = await supabase.from('expenses').delete().eq('id', id)
+    if (error) alert(error.message)
+    else loadExpenses()
   }
 
   const totalExpenses = expenses.reduce((sum, exp) => sum + exp.amount, 0)
@@ -95,142 +54,120 @@ export default function ExpensesPage() {
     return acc
   }, {})
 
-  const getCategoryColor = (category: string) => {
-    const colors: Record<string, string> = {
-      Office: "bg-blue-100 text-blue-800",
-      Staff: "bg-green-100 text-green-800",
-      Travel: "bg-purple-100 text-purple-800",
-      Marketing: "bg-orange-100 text-orange-800",
-      Misc: "bg-gray-100 text-gray-800",
-    }
-    return colors[category] || colors.Misc
-  }
+  const topCategory = Object.entries(categoryBreakdown).sort(([, a], [, b]) => b - a)[0]?.[0] || "N/A"
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-8 space-y-8 animate-in fade-in duration-500">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Daily Expenses Register</h1>
-        <div className="flex gap-2">
+        <div>
+          <h1 className="text-3xl font-bold font-heading flex items-center gap-3">
+            <Receipt className="w-8 h-8 text-primary" />
+            Expenses Register
+          </h1>
+          <p className="text-muted-foreground mt-1">Track and audit operational expenditures</p>
+        </div>
+        <div className="flex gap-3">
           <Dialog open={expenseDialogOpen} onOpenChange={setExpenseDialogOpen}>
             <DialogTrigger asChild>
-              <Button className="gap-2">
+              <Button className="gap-2 bg-primary hover:bg-primary/90 h-11 px-6 shadow-lg shadow-primary/20">
                 <Plus className="w-4 h-4" />
-                Add Expense
+                Record Expense
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-3xl">
-              <ExpenseManagementModal 
-                ownerType="super_admin"
-                onSuccess={() => {
-                  setExpenseDialogOpen(false)
-                  loadExpenses() // Reload expenses
-                  alert('Expense added successfully!')
-                }} 
-              />
+            <DialogContent className="max-w-4xl p-0 overflow-hidden border-none shadow-2xl">
+              <div className="bg-primary/5 p-6 border-b">
+                <DialogHeader>
+                  <DialogTitle className="text-2xl font-bold font-heading">New Expense Entry</DialogTitle>
+                </DialogHeader>
+              </div>
+              <div className="p-6">
+                <ExpenseManagementModal
+                  ownerType="super_admin"
+                  onSuccess={() => {
+                    setExpenseDialogOpen(false)
+                    loadExpenses()
+                    alert('Expense recorded!')
+                  }}
+                />
+              </div>
             </DialogContent>
           </Dialog>
 
-          <Button variant="outline" className="gap-2 bg-transparent">
+          <Button variant="outline" className="gap-2 border-muted h-11">
             <Download className="w-4 h-4" />
-            Export
+            Download CSV
           </Button>
         </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="p-6">
-          <p className="text-sm text-muted-foreground mb-2">Total Expenses</p>
-          <p className="text-3xl font-bold">₹{(totalExpenses / 1000).toFixed(0)}K</p>
+      {/* Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <Card className="p-6 bg-red-50/30 border-red-100 shadow-sm">
+          <div className="flex justify-between items-start">
+            <p className="text-sm font-semibold text-red-600 mb-2 uppercase tracking-wider">Total Outflow</p>
+            <div className="p-2 bg-red-100 rounded-lg"><ArrowUpRight className="w-4 h-4 text-red-600" /></div>
+          </div>
+          <p className="text-3xl font-black text-red-700">₹{totalExpenses.toLocaleString()}</p>
         </Card>
-        <Card className="p-6">
-          <p className="text-sm text-muted-foreground mb-2">Monthly Average</p>
-          <p className="text-3xl font-bold">₹{((totalExpenses * 2.5) / 100000).toFixed(1)}L</p>
+        <Card className="p-6 bg-blue-50/30 border-blue-100 shadow-sm">
+          <p className="text-sm font-semibold text-blue-600 mb-2 uppercase tracking-wider">Top Spend</p>
+          <p className="text-3xl font-black text-blue-700 capitalize">{topCategory.replace(/_/g, " ")}</p>
         </Card>
-        <Card className="p-6">
-          <p className="text-sm text-muted-foreground mb-2">Total Entries</p>
-          <p className="text-3xl font-bold">{expenses.length}</p>
+        <Card className="p-6 bg-slate-50 border-slate-200 shadow-sm">
+          <p className="text-sm font-semibold text-slate-500 mb-2 uppercase tracking-wider">Total Entries</p>
+          <p className="text-3xl font-black text-slate-800">{expenses.length}</p>
         </Card>
-        <Card className="p-6 bg-primary text-primary-foreground">
-          <p className="text-sm opacity-90 mb-2">Highest Category</p>
-          <p className="text-3xl font-bold">
-            {Object.entries(categoryBreakdown).sort(([, a], [, b]) => b - a)[0]?.[0] || "N/A"}
-          </p>
+        <Card className="p-6 bg-primary text-white shadow-xl shadow-primary/10 border-none">
+          <div className="flex justify-between items-start">
+            <p className="text-sm font-bold opacity-80 mb-2 uppercase tracking-wider">Avg Expense</p>
+            <PieChart className="w-5 h-5 opacity-50" />
+          </div>
+          <p className="text-3xl font-black">₹{expenses.length ? (totalExpenses / expenses.length).toFixed(0).toLocaleString() : 0}</p>
         </Card>
       </div>
 
-      {/* Category Breakdown */}
-      <Card className="p-6">
-        <h3 className="text-lg font-semibold mb-4">Expense Categories</h3>
-        <div className="space-y-3">
-          {Object.entries(categoryBreakdown).map(([category, amount]) => (
-            <div key={category} className="flex justify-between items-center">
-              <span className="font-medium">{category}</span>
-              <div className="flex items-center gap-4">
-                <div className="w-40 h-2 bg-muted rounded-full overflow-hidden">
-                  <div className="h-full bg-blue-500" style={{ width: `${(amount / totalExpenses) * 100}%` }} />
-                </div>
-                <span className="font-semibold w-24 text-right">₹{(amount / 1000).toFixed(0)}K</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      {/* Expenses Table */}
-      <Card className="p-6">
-        <h3 className="text-lg font-semibold mb-4">Expense Records</h3>
-        {loading ? (
-          <div className="text-center py-8">Loading expenses...</div>
-        ) : error ? (
-          <div className="text-center py-8 text-red-600">{error}</div>
-        ) : (
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* Table */}
+        <Card className="lg:col-span-2 border-none shadow-md overflow-hidden">
           <div className="overflow-x-auto">
             <Table>
-              <TableHeader>
-                <TableRow className="border-b border-border">
-                  <TableHead>Receipt</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Amount</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Approver</TableHead>
-                  <TableHead>Action</TableHead>
+              <TableHeader className="bg-muted/40">
+                <TableRow>
+                  <TableHead className="font-bold">Entry</TableHead>
+                  <TableHead className="font-bold">Category</TableHead>
+                  <TableHead className="font-bold">Amount</TableHead>
+                  <TableHead className="font-bold">Date</TableHead>
+                  <TableHead className="text-right font-bold">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {expenses.length === 0 ? (
+                {loading ? (
+                  <TableRow><TableCell colSpan={5} className="text-center py-20"><Loader2 className="w-8 h-8 animate-spin mx-auto opacity-20" /></TableCell></TableRow>
+                ) : expenses.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                      No expenses found. Add your first expense to get started.
+                    <TableCell colSpan={5} className="text-center py-12 text-muted-foreground italic">
+                      No expense records found.
                     </TableCell>
                   </TableRow>
                 ) : (
                   expenses.map((expense) => (
-                    <TableRow key={expense.id} className="border-b border-border hover:bg-muted/50">
-                      <TableCell className="font-mono text-sm">{expense.receipt}</TableCell>
+                    <TableRow key={expense.id} className="hover:bg-muted/10 transition-colors group">
                       <TableCell>
-                        <span
-                          className={`px-3 py-1 rounded-full text-sm font-medium ${getCategoryColor(expense.category)}`}
-                        >
-                          {expense.category}
-                        </span>
+                        <div>
+                          <p className="font-bold text-sm">{expense.title}</p>
+                          <p className="text-[10px] text-muted-foreground uppercase">{expense.payment_mode}</p>
+                        </div>
                       </TableCell>
-                      <TableCell>{expense.description}</TableCell>
-                      <TableCell className="font-semibold">₹{expense.amount.toLocaleString()}</TableCell>
-                      <TableCell>{expense.date}</TableCell>
-                      <TableCell>{expense.approver}</TableCell>
                       <TableCell>
-                        <div className="flex gap-2">
-                          <Button variant="ghost" size="sm">
-                            <Edit2 className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-red-600"
-                            onClick={() => handleDeleteExpense(expense.id)}
-                          >
+                        <Badge variant="secondary" className="capitalize text-[10px] font-bold tracking-tighter">
+                          {expense.category.replace(/_/g, " ")}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-black text-red-600 font-mono">₹{expense.amount.toLocaleString()}</TableCell>
+                      <TableCell className="text-xs font-medium text-muted-foreground">{new Date(expense.date).toLocaleDateString()}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-1 opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button variant="ghost" size="sm" onClick={() => handleDeleteExpense(expense.id)} className="text-red-500 hover:text-red-700 hover:bg-red-50">
                             <Trash2 className="w-4 h-4" />
                           </Button>
                         </div>
@@ -241,8 +178,32 @@ export default function ExpensesPage() {
               </TableBody>
             </Table>
           </div>
-        )}
-      </Card>
+        </Card>
+
+        {/* Categories List */}
+        <Card className="p-6 border-none shadow-md h-fit">
+          <h3 className="text-lg font-bold font-heading mb-6 flex items-center gap-2">
+            <PieChart className="w-5 h-5 text-primary" />
+            Allocation
+          </h3>
+          <div className="space-y-6">
+            {Object.entries(categoryBreakdown).sort(([, a], [, b]) => b - a).map(([category, amount]) => (
+              <div key={category} className="space-y-2">
+                <div className="flex justify-between items-center text-sm">
+                  <span className="font-bold capitalize opacity-80">{category.replace(/_/g, " ")}</span>
+                  <span className="font-black text-primary">₹{amount.toLocaleString()}</span>
+                </div>
+                <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary transition-all duration-1000"
+                    style={{ width: `${(amount / totalExpenses) * 100}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
     </div>
   )
 }

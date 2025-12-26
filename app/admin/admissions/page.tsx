@@ -10,21 +10,31 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { AdmissionForm } from "@/components/admin/admission-form"
 import { AdmissionReviewModal } from "@/components/admin/admission-review-modal"
 
+import { createClient } from "@/lib/supabase"
+
 interface Admission {
-  id: number
+  id: string
   student_name: string
   student_email: string
-  course: string
-  university: string
-  consultancy: string
-  total_fee: number
-  fee_received: number
   status: string
+  total_fee: number
+  fee_paid: number
+
+  university_courses: {
+    master_courses: {
+      name: string
+    }
+  }
+  universities: {
+    name: string
+  }
+  consultancies: {
+    name: string
+  }
   created_at: string
 }
 
 export default function AdmissionsPage() {
-  const { data: session } = useSession()
   const [admissions, setAdmissions] = useState<Admission[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -32,33 +42,51 @@ export default function AdmissionsPage() {
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false)
   const [selectedAdmission, setSelectedAdmission] = useState<Admission | null>(null)
 
-  // Load admissions data on component mount
+  const supabase = createClient()
+
   useEffect(() => {
-    if (session?.accessToken) {
-      loadAdmissions()
-    }
-  }, [session])
+    loadAdmissions()
+  }, [])
 
   const loadAdmissions = async () => {
     try {
       setLoading(true)
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://perl-backend-env.up.railway.app/api/'
-      const response = await fetch(`${backendUrl}/api/admissions`, {
-        headers: {
-          'Authorization': `Bearer ${session?.accessToken}`,
-        },
-      })
-      if (response.ok) {
-        const data = await response.json()
-        // Assuming backend returns data directly or wrapped in success response
-        const admissionsData = data.success ? data.data : data
-        setAdmissions(admissionsData)
-      } else {
-        setError('Failed to load admissions')
-      }
-    } catch (error) {
+      const { data, error } = await supabase
+        .from('admissions')
+        .select(`
+          id,
+          student_name,
+          student_email,
+          status,
+          total_fee,
+          fee_paid,
+
+          created_at,
+          university_id,
+          course_id,
+          consultancy_id,
+          universities ( name ),
+          consultancies ( name ),
+          university_courses (
+            master_courses ( name )
+          )
+        `)
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+
+      // Transform data for easier consumption in the UI
+      const formattedData = (data as any[]).map(item => ({
+        ...item,
+        course: item.university_courses?.master_courses?.name || 'N/A',
+        university: item.universities?.name || 'N/A',
+        consultancy: item.consultancies?.name || 'N/A'
+      }))
+
+      setAdmissions(formattedData)
+    } catch (error: any) {
       console.error('Error loading admissions:', error)
-      setError('Failed to load admissions')
+      setError(error.message || 'Failed to load admissions')
     } finally {
       setLoading(false)
     }
@@ -71,6 +99,7 @@ export default function AdmissionsPage() {
       case "pending":
         return "text-yellow-600 bg-yellow-50"
       case "reverted":
+      case "rejected":
         return "text-red-600 bg-red-50"
       default:
         return "text-gray-600 bg-gray-50"
@@ -78,15 +107,34 @@ export default function AdmissionsPage() {
   }
 
   const getFeePercentage = (received: number, total: number) => {
+    if (!total || total === 0) return 0
     return Math.round((received / total) * 100)
   }
 
-  const handleApprove = (id: number) => {
-    setAdmissions(admissions.map((a) => (a.id === id ? { ...a, status: "approved" } : a)))
+  const handleApprove = async (id: string) => {
+    const { error } = await supabase
+      .from('admissions')
+      .update({ status: 'approved' })
+      .eq('id', id)
+
+    if (error) {
+      alert("Failed to approve: " + error.message)
+    } else {
+      loadAdmissions()
+    }
   }
 
-  const handleReject = (id: number) => {
-    setAdmissions(admissions.map((a) => (a.id === id ? { ...a, status: "rejected" } : a)))
+  const handleReject = async (id: string) => {
+    const { error } = await supabase
+      .from('admissions')
+      .update({ status: 'rejected' })
+      .eq('id', id)
+
+    if (error) {
+      alert("Failed to reject: " + error.message)
+    } else {
+      loadAdmissions()
+    }
   }
 
   const handleReview = (admission: Admission) => {
@@ -145,7 +193,8 @@ export default function AdmissionsPage() {
                   </TableRow>
                 ) : (
                   admissions.map((admission) => {
-                    const feePercentage = getFeePercentage(admission.fee_received, admission.total_fee)
+                    const feePercentage = getFeePercentage(admission.fee_paid, admission.total_fee)
+
                     return (
                       <TableRow key={admission.id} className="border-b border-border hover:bg-muted/50">
                         <TableCell className="font-medium">{admission.student_name}</TableCell>
@@ -169,8 +218,8 @@ export default function AdmissionsPage() {
                         </TableCell>
                         <TableCell>
                           <div className="flex gap-2">
-                            <Button 
-                              variant="ghost" 
+                            <Button
+                              variant="ghost"
                               size="sm"
                               onClick={() => handleReview(admission)}
                               title="Review Admission"
@@ -217,7 +266,7 @@ export default function AdmissionsPage() {
         if (!open) setSelectedAdmission(null)
       }}>
         <DialogContent className="max-w-4xl">
-          <AdmissionReviewModal 
+          <AdmissionReviewModal
             admissionId={selectedAdmission?.id.toString() || ""}
             studentName={selectedAdmission?.student_name || ""}
             onSuccess={() => {
@@ -225,7 +274,7 @@ export default function AdmissionsPage() {
               setSelectedAdmission(null)
               loadAdmissions() // Reload admissions
               alert('Admission reviewed successfully!')
-            }} 
+            }}
           />
         </DialogContent>
       </Dialog>

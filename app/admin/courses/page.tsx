@@ -8,12 +8,13 @@ import { Label } from "@/components/ui/label"
 import { Plus, Edit2, Trash2 } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { CourseAutopilotForm } from "@/components/admin/course-autopilot-form"
-import { MapCourseUniversityModal } from "@/components/admin/map-course-university-modal"
+import { CourseManagementModal } from "@/components/admin/course-management-modal"
 import { useToast } from "@/hooks/use-toast"
+import { Badge } from "@/components/ui/badge"
+import { createClient } from "@/lib/supabase"
 
 interface Course {
-  id: number
+  id: string
   name: string
   abbreviation?: string
   code?: string
@@ -96,14 +97,16 @@ interface Course {
 }
 
 interface UniversityCourse {
-  id: number
+  id: string
   course_name: string
   university_name: string
   university_fee: number
   student_display_fee: number
   consultancy_share: number
-  agent_commission: number
-  fee_mode: string
+  commission_type: string
+  intake_capacity: number
+  mode_of_study: string
+  is_active: boolean
 }
 
 export default function CoursesPage() {
@@ -114,50 +117,32 @@ export default function CoursesPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const [activeTab, setActiveTab] = useState<"master" | "university">("master")
-  const [autopilotDialogOpen, setAutopilotDialogOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState<"master" | "university">("university")
+  const [courseModalOpen, setCourseModalOpen] = useState(false)
   const [mapCourseDialogOpen, setMapCourseDialogOpen] = useState(false)
-  const [editingCourse, setEditingCourse] = useState<Course | null>(null)
-  const [editingMapping, setEditingMapping] = useState<UniversityCourse | null>(null)
-  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null)
-  const [deleteMappingConfirmId, setDeleteMappingConfirmId] = useState<number | null>(null)
+  const [editingMapping, setEditingMapping] = useState<any | null>(null)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const [deleteMappingConfirmId, setDeleteMappingConfirmId] = useState<string | null>(null)
 
   // Load data on component mount
   useEffect(() => {
-    const storedToken = localStorage.getItem('token')
-    if (storedToken) {
-      setToken(storedToken)
-      loadCourses(storedToken)
-      loadUniversityCourses()
-    } else {
-      setLoading(false)
-      setError('No authentication token found')
-    }
+    loadCourses()
+    loadUniversityCourses()
   }, [])
 
-  const loadCourses = async (authToken: string) => {
+  const loadCourses = async () => {
     try {
-      console.log("Loading courses...")
       setLoading(true)
-      const backendUrl = 'https://perl-backend-env.up.railway.app'
-      const response = await fetch(`${backendUrl}/api/courses`, {
-        headers: {
-          'Authorization': `Bearer ${authToken}`,
-        },
-      })
+      const supabase = createClient()
+      const { data, error } = await supabase
+        .from('master_courses')
+        .select('*')
+        .order('created_at', { ascending: false })
 
-      if (response.ok) {
-        const data = await response.json()
-        // Assuming backend returns data directly or wrapped in success response
-        const coursesData = data.success ? data.data : data
-        const uniqueCourses = (Array.isArray(coursesData) ? coursesData : []).filter((c, index, arr) => arr.findIndex(c2 => c2.id === c.id) === index)
-        setCourses(uniqueCourses)
-        setError(null)
-      } else {
-        const errorText = await response.text()
-        console.error("Courses API error:", errorText)
-        setError('Failed to load courses')
-      }
+      if (error) throw error
+
+      setCourses(data || [])
+      setError(null)
     } catch (error) {
       console.error('Error loading courses:', error)
       setError('Failed to load courses')
@@ -168,77 +153,51 @@ export default function CoursesPage() {
 
   const loadUniversityCourses = async () => {
     try {
-      const backendUrl = 'https://perl-backend-env.up.railway.app'
-      
-      // Fetch universities for name mapping
-      const uniResponse = await fetch(`${backendUrl}/api/universities`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      })
-      
-      let uniMap: Record<string, string> = {}
-      if (uniResponse.ok) {
-        const uniData = await uniResponse.json()
-        const unis = uniData.data?.universities || uniData.universities || uniData || []
-        uniMap = (Array.isArray(unis) ? unis : []).reduce((acc, uni) => ({ ...acc, [uni.id]: uni.name }), {})
-      }
+      const supabase = createClient()
+      const { data, error } = await supabase
+        .from('university_courses')
+        .select('*, universities(name), master_courses(name)')
+        .order('created_at', { ascending: false })
 
-      // Fetch courses and transform to mappings
-      const courseResponse = await fetch(`${backendUrl}/api/courses`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      })
+      if (error) throw error
 
-      if (courseResponse.ok) {
-        const courseData = await courseResponse.json()
-        const coursesData = courseData.success ? courseData.data : courseData
-        const transformed = (Array.isArray(coursesData) ? coursesData : []).flatMap(course => 
-          course.universityIds?.map((uniId: string, index: number) => ({
-            id: course.id * 100 + index,
-            course_name: course.name,
-            university_name: uniMap[uniId] || `University ${uniId}`,
-            university_fee: course.fees || 0,
-            student_display_fee: course.fees ? course.fees * 1.2 : 0,
-            consultancy_share: course.fees ? course.fees * 0.1 : 0,
-            agent_commission: course.fees ? course.fees * 0.05 : 0,
-            fee_mode: 'share_deduct'
-          })) || []
-        )
-        setUniversityCourses(transformed)
-      }
+      const transformed = (data || []).map((uc: any) => ({
+        id: uc.id,
+        course_name: uc.master_courses?.name || 'Unknown',
+        university_name: uc.universities?.name || 'Unknown',
+        university_fee: uc.university_fee || 0,
+        student_display_fee: uc.display_fee || 0,
+        consultancy_share: uc.commission_value || 0,
+        commission_type: uc.commission_type || 'percentage',
+        intake_capacity: uc.intake_capacity || 0,
+        mode_of_study: uc.mode_of_study || 'regular',
+        is_active: uc.is_active
+      }))
+
+      setUniversityCourses(transformed)
     } catch (error) {
       console.error('Error loading university courses:', error)
     }
   }
 
-  const handleDeleteCourse = async (id: number) => {
+  const handleDeleteCourse = async (id: string) => {
     if (!confirm("Are you sure you want to delete this course?")) return
 
     try {
-      const backendUrl = 'https://perl-backend-env.up.railway.app'
-      const response = await fetch(`${backendUrl}/api/courses/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      })
+      const supabase = createClient()
+      const { error } = await supabase
+        .from('master_courses')
+        .delete()
+        .eq('id', id)
 
-      if (response.ok) {
-        setCourses(courses.filter((c) => c.id !== id))
-        setDeleteConfirmId(null)
-        toast({
-          title: "Success",
-          description: "Course deleted successfully",
-        })
-      } else {
-        toast({
-          title: "Error",
-          description: "Failed to delete course",
-          variant: "destructive",
-        })
-      }
+      if (error) throw error
+
+      setCourses(courses.filter((c) => c.id !== id))
+      setDeleteConfirmId(null)
+      toast({
+        title: "Success",
+        description: "Course deleted successfully",
+      })
     } catch (error) {
       console.error('Error deleting course:', error)
       toast({
@@ -249,23 +208,66 @@ export default function CoursesPage() {
     }
   }
 
-  const handleDeleteMapping = (id: number) => {
-    // In real app, call API to delete
-    setDeleteMappingConfirmId(null)
-    toast({
-      title: "Success",
-      description: "University course mapping deleted successfully",
+  const handleDeleteMapping = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this mapping?")) return
+
+    try {
+      const supabase = createClient()
+      const { error } = await supabase
+        .from('university_courses')
+        .delete()
+        .eq('id', id)
+
+      if (error) throw error
+
+      setUniversityCourses(universityCourses.filter(uc => uc.id !== id))
+      setDeleteMappingConfirmId(null)
+      toast({
+        title: "Success",
+        description: "University course mapping deleted successfully",
+      })
+    } catch (error) {
+      console.error('Error deleting mapping:', error)
+      toast({
+        title: "Error",
+        description: "Failed to delete mapping",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleEditCourse = (course: any) => {
+    // Map master course fields to the format expected by the modal
+    setEditingMapping({
+      master_course_id: course.id,
+      name: course.name,
+      code: course.code,
+      stream: course.stream,
+      level: course.level,
+      duration: course.duration,
+      semesters: course.semesters,
+      metadata: { description: course.description },
+      is_active: course.is_active
     })
+    setCourseModalOpen(true)
   }
 
-  const handleEditCourse = (course: Course) => {
-    setEditingCourse(course)
-    setAutopilotDialogOpen(true)
-  }
+  const handleEditMapping = async (mapping: any) => {
+    try {
+      setLoading(true)
+      const supabase = createClient()
+      const { data, error } = await supabase
+        .from('university_courses')
+        .select('*, master_courses(*)')
+        .eq('id', mapping.id)
+        .single()
 
-  const handleEditMapping = (mapping: UniversityCourse) => {
-    setEditingMapping(mapping)
-    setMapCourseDialogOpen(true)
+      if (error) throw error
+      setEditingMapping(data)
+      setCourseModalOpen(true)
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -297,21 +299,19 @@ export default function CoursesPage() {
       <div className="flex gap-2 border-b border-border">
         <button
           onClick={() => setActiveTab("master")}
-          className={`px-4 py-2 font-medium border-b-2 transition-colors ${
-            activeTab === "master"
-              ? "border-primary text-primary"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          }`}
+          className={`px-4 py-2 font-medium border-b-2 transition-colors ${activeTab === "master"
+            ? "border-primary text-primary"
+            : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
         >
           Master Courses
         </button>
         <button
           onClick={() => setActiveTab("university")}
-          className={`px-4 py-2 font-medium border-b-2 transition-colors ${
-            activeTab === "university"
-              ? "border-primary text-primary"
-              : "border-transparent text-muted-foreground hover:text-foreground"
-          }`}
+          className={`px-4 py-2 font-medium border-b-2 transition-colors ${activeTab === "university"
+            ? "border-primary text-primary"
+            : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
         >
           University Course Mapping
         </button>
@@ -321,39 +321,37 @@ export default function CoursesPage() {
       {activeTab === "master" && (
         <div className="space-y-6">
           <div className="flex justify-end">
-            <Dialog 
-              open={autopilotDialogOpen} 
-              onOpenChange={(open) => {
-                setAutopilotDialogOpen(open)
-                if (!open) setEditingCourse(null)
+            <Dialog
+              open={courseModalOpen}
+              onOpenChange={(v: boolean) => {
+                setCourseModalOpen(v)
+                if (!v) setEditingMapping(null)
               }}
             >
               <DialogTrigger asChild>
-                <Button 
-                  className="gap-2"
-                  onClick={() => setEditingCourse(null)}
-                >
-                  <Plus className="w-4 h-4" />
-                  Add Master Course (Full-Fledge Autopilot)
+                <Button className="gap-2 bg-primary font-black shadow-lg shadow-primary/20">
+                  <Plus className="w-4 h-4" /> Add Academic Program
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-[95vw] max-h-[95vh] overflow-y-auto">
-                <DialogHeader>
-                  <DialogTitle>{editingCourse ? "Edit" : "Add"} Course (Autopilot)</DialogTitle>
-                </DialogHeader>
-                <CourseAutopilotForm 
-                  editMode={!!editingCourse}
-                  courseData={editingCourse}
-                  onSuccess={() => {
-                    setAutopilotDialogOpen(false)
-                    setEditingCourse(null)
-                    loadCourses(token) // Reload courses
-                    toast({
-                      title: "Success",
-                      description: `Course ${editingCourse ? 'updated' : 'created'} successfully`,
-                    })
-                  }} 
-                />
+              <DialogContent className="max-w-4xl p-0 overflow-hidden border-none">
+                <div className="p-6 bg-slate-900 text-white">
+                  <h2 className="text-2xl font-black flex items-center gap-3">
+                    <Plus className="w-8 h-8 text-primary" />
+                    {editingMapping ? "Refine Course Offering" : "Launch New Program"}
+                  </h2>
+                  <p className="text-slate-400 text-xs mt-1 uppercase tracking-widest">Manual Deployment Console</p>
+                </div>
+                <div className="p-6">
+                  <CourseManagementModal
+                    editData={editingMapping}
+                    onSuccess={() => {
+                      setCourseModalOpen(false)
+                      setEditingMapping(null)
+                      loadCourses()
+                      loadUniversityCourses()
+                    }}
+                  />
+                </div>
               </DialogContent>
             </Dialog>
           </div>
@@ -407,8 +405,8 @@ export default function CoursesPage() {
                           </TableCell>
                           <TableCell>
                             <div className="flex gap-2">
-                              <Button 
-                                variant="ghost" 
+                              <Button
+                                variant="ghost"
                                 size="sm"
                                 onClick={() => handleEditCourse(course)}
                                 title="Edit Course"
@@ -460,38 +458,9 @@ export default function CoursesPage() {
       {activeTab === "university" && (
         <div className="space-y-6">
           <div className="flex justify-end">
-            <Dialog 
-              open={mapCourseDialogOpen} 
-              onOpenChange={(open) => {
-                setMapCourseDialogOpen(open)
-                if (!open) setEditingMapping(null)
-              }}
-            >
-              <DialogTrigger asChild>
-                <Button 
-                  className="gap-2"
-                  onClick={() => setEditingMapping(null)}
-                >
-                  <Plus className="w-4 h-4" />
-                  Map Course to University
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-4xl">
-                <DialogHeader>
-                  <DialogTitle>Map Course to University</DialogTitle>
-                </DialogHeader>
-                <MapCourseUniversityModal 
-                  onSuccess={() => {
-                    setMapCourseDialogOpen(false)
-                    setEditingMapping(null)
-                    toast({
-                      title: "Success",
-                      description: `Course mapping ${editingMapping ? 'updated' : 'created'} successfully`,
-                    })
-                  }} 
-                />
-              </DialogContent>
-            </Dialog>
+            <Button className="gap-2" onClick={() => setCourseModalOpen(true)}>
+              <Plus className="w-4 h-4" /> Map New Course
+            </Button>
           </div>
 
           {/* University Courses Table */}
@@ -503,32 +472,48 @@ export default function CoursesPage() {
                   <TableRow className="border-b border-border">
                     <TableHead>Course Name</TableHead>
                     <TableHead>University</TableHead>
-                    <TableHead>University Fee</TableHead>
-                    <TableHead>Display Fee</TableHead>
-                    <TableHead>Consultancy Share</TableHead>
-                    <TableHead>Agent Commission</TableHead>
+                    <TableHead>Study Fee</TableHead>
+                    <TableHead>Partner Payout</TableHead>
+                    <TableHead>Intake</TableHead>
                     <TableHead>Mode</TableHead>
+                    <TableHead>Status</TableHead>
                     <TableHead>Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {universityCourses.map((uc) => (
                     <TableRow key={uc.id} className="border-b border-border hover:bg-muted/50">
-                      <TableCell className="font-medium">{uc.course_name}</TableCell>
-                      <TableCell>{uc.university_name}</TableCell>
-                      <TableCell>₹{(uc.university_fee / 100000).toFixed(1)}L</TableCell>
-                      <TableCell>₹{(uc.student_display_fee / 100000).toFixed(1)}L</TableCell>
-                      <TableCell>₹{(uc.consultancy_share / 1000).toFixed(0)}K</TableCell>
-                      <TableCell>₹{(uc.agent_commission / 1000).toFixed(0)}K</TableCell>
+                      <TableCell className="font-medium text-blue-600">{uc.course_name}</TableCell>
+                      <TableCell className="font-bold">{uc.university_name}</TableCell>
                       <TableCell>
-                        <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded text-sm">
-                          {uc.fee_mode === "share_deduct" ? "Share Deduct" : "Full Fee"}
+                        <div className="flex flex-col">
+                          <span className="text-sm font-bold text-green-700">₹{uc.student_display_fee.toLocaleString()}</span>
+                          <span className="text-[10px] text-muted-foreground uppercase tracking-widest">Net: ₹{uc.university_fee.toLocaleString()}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-col">
+                          <span className="text-sm font-bold">
+                            {uc.commission_type === 'percentage' ? `${uc.consultancy_share}%` : `₹${uc.consultancy_share.toLocaleString()}`}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground uppercase">{uc.commission_type} Payout</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-medium">{uc.intake_capacity}</TableCell>
+                      <TableCell>
+                        <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded text-[10px] font-bold uppercase tracking-widest">
+                          {uc.mode_of_study}
                         </span>
                       </TableCell>
                       <TableCell>
+                        <Badge variant={uc.is_active ? "default" : "secondary"} className={uc.is_active ? "bg-green-500" : ""}>
+                          {uc.is_active ? "Active" : "Paused"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
                         <div className="flex gap-2">
-                          <Button 
-                            variant="ghost" 
+                          <Button
+                            variant="ghost"
                             size="sm"
                             onClick={() => handleEditMapping(uc)}
                             title="Edit Mapping"
@@ -553,9 +538,9 @@ export default function CoursesPage() {
                               </Button>
                             </div>
                           ) : (
-                            <Button 
-                              variant="ghost" 
-                              size="sm" 
+                            <Button
+                              variant="ghost"
+                              size="sm"
                               className="text-red-600 hover:text-red-700 hover:bg-red-50"
                               onClick={() => setDeleteMappingConfirmId(uc.id)}
                               title="Delete Mapping"

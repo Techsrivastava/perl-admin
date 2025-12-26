@@ -1,14 +1,14 @@
 "use client"
 
 import type React from "react"
-
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { createClient } from "@/lib/supabase"
 
 interface AgentFormProps {
   onSuccess?: () => void
@@ -16,6 +16,9 @@ interface AgentFormProps {
 }
 
 export function AgentForm({ onSuccess, consultancyId }: AgentFormProps) {
+  const [loading, setLoading] = useState(false)
+  const [consultancies, setConsultancies] = useState<{ id: string, name: string }[]>([])
+
   const [formData, setFormData] = useState({
     name: "",
     consultancy_id: consultancyId || "",
@@ -23,52 +26,61 @@ export function AgentForm({ onSuccess, consultancyId }: AgentFormProps) {
     contact_phone: "",
     city: "",
     state: "",
-    username: "",
-    password: "",
     default_commission_percent: "10",
-    assigned_courses: [] as string[],
   })
 
-  const [permissions, setPermissions] = useState({
-    can_submit_fee: true,
-    can_view_commission: true,
-    can_download_slips: true,
-    can_edit_profile_basic: true,
-    can_view_students: true,
-  })
+  // Fetch consultancies for dropdown
+  useEffect(() => {
+    const fetchConsultancies = async () => {
+      const supabase = createClient()
+      const { data } = await supabase.from('consultancies').select('id, name')
+      if (data) setConsultancies(data)
+    }
+    fetchConsultancies()
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setLoading(true)
+
     try {
-      const response = await fetch("/api/agents", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
-      })
-      if (response.ok) {
-        onSuccess?.()
-        setFormData({
-          name: "",
-          consultancy_id: consultancyId || "",
-          contact_email: "",
-          contact_phone: "",
-          city: "",
-          state: "",
-          username: "",
-          password: "",
-          default_commission_percent: "10",
-          assigned_courses: [],
-        })
-        setPermissions({
-          can_submit_fee: true,
-          can_view_commission: true,
-          can_download_slips: true,
-          can_edit_profile_basic: true,
-          can_view_students: true,
-        })
+      const supabase = createClient()
+
+      const insertData = {
+        name: formData.name,
+        consultancy_id: formData.consultancy_id,
+        contact_email: formData.contact_email,
+        contact_phone: formData.contact_phone,
+        city: formData.city,
+        state: formData.state,
+        commission_rate: parseFloat(formData.default_commission_percent),
+        status: 'active', // default status
+        wallet_balance: 0.00
       }
-    } catch (error) {
+
+      const { error } = await supabase
+        .from('agents')
+        .insert(insertData)
+
+      if (error) throw error
+
+      onSuccess?.()
+
+      setFormData({
+        name: "",
+        consultancy_id: consultancyId || "",
+        contact_email: "",
+        contact_phone: "",
+        city: "",
+        state: "",
+        default_commission_percent: "10",
+      })
+
+    } catch (error: any) {
       console.error("Failed to add agent:", error)
+      alert(`Failed to add agent: ${error.message}`)
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -97,9 +109,9 @@ export function AgentForm({ onSuccess, consultancyId }: AgentFormProps) {
                   <SelectValue placeholder="Select consultancy" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="1">Global Education Consultants</SelectItem>
-                  <SelectItem value="2">Future Path Consultancy</SelectItem>
-                  <SelectItem value="3">Success Study Abroad</SelectItem>
+                  {consultancies.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -155,41 +167,9 @@ export function AgentForm({ onSuccess, consultancyId }: AgentFormProps) {
 
       <Separator />
 
-      {/* Login Credentials */}
+      {/* Commission */}
       <div className="space-y-4">
-        <h3 className="text-lg font-semibold">Login Credentials</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <Label htmlFor="username">Username *</Label>
-            <Input
-              id="username"
-              placeholder="Unique username"
-              value={formData.username}
-              onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-              required
-            />
-          </div>
-
-          <div>
-            <Label htmlFor="password">Password *</Label>
-            <Input
-              id="password"
-              type="password"
-              placeholder="Min 8 characters"
-              value={formData.password}
-              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-              required
-              minLength={8}
-            />
-          </div>
-        </div>
-      </div>
-
-      <Separator />
-
-      {/* Commission & Courses */}
-      <div className="space-y-4">
-        <h3 className="text-lg font-semibold">Commission & Courses</h3>
+        <h3 className="text-lg font-semibold">Commission</h3>
         <div className="grid grid-cols-1 gap-4">
           <div>
             <Label htmlFor="commission">Default Commission % *</Label>
@@ -206,76 +186,11 @@ export function AgentForm({ onSuccess, consultancyId }: AgentFormProps) {
             />
             <p className="text-xs text-muted-foreground mt-1">This will be applied to all admissions by this agent</p>
           </div>
-
-          <div>
-            <Label htmlFor="courses">Assigned Courses (Optional)</Label>
-            <Select>
-              <SelectTrigger>
-                <SelectValue placeholder="Select courses to assign" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="1">B.Tech Computer Science</SelectItem>
-                <SelectItem value="2">M.Tech AI & ML</SelectItem>
-                <SelectItem value="3">BCA - Computer Applications</SelectItem>
-                <SelectItem value="4">MBA - General</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground mt-1">Agent will only be able to process admissions for assigned courses</p>
-          </div>
         </div>
       </div>
 
-      <Separator />
-
-      {/* Permissions */}
-      <div className="space-y-4">
-        <h3 className="text-lg font-semibold">Agent Permissions</h3>
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <Label htmlFor="perm-submit-fee">Can Submit Fee</Label>
-            <Switch
-              id="perm-submit-fee"
-              checked={permissions.can_submit_fee}
-              onCheckedChange={(checked) => setPermissions({ ...permissions, can_submit_fee: checked })}
-            />
-          </div>
-          <div className="flex items-center justify-between">
-            <Label htmlFor="perm-view-commission">Can View Commission</Label>
-            <Switch
-              id="perm-view-commission"
-              checked={permissions.can_view_commission}
-              onCheckedChange={(checked) => setPermissions({ ...permissions, can_view_commission: checked })}
-            />
-          </div>
-          <div className="flex items-center justify-between">
-            <Label htmlFor="perm-download-slips">Can Download Fee Slips</Label>
-            <Switch
-              id="perm-download-slips"
-              checked={permissions.can_download_slips}
-              onCheckedChange={(checked) => setPermissions({ ...permissions, can_download_slips: checked })}
-            />
-          </div>
-          <div className="flex items-center justify-between">
-            <Label htmlFor="perm-edit-profile">Can Edit Profile (Basic)</Label>
-            <Switch
-              id="perm-edit-profile"
-              checked={permissions.can_edit_profile_basic}
-              onCheckedChange={(checked) => setPermissions({ ...permissions, can_edit_profile_basic: checked })}
-            />
-          </div>
-          <div className="flex items-center justify-between">
-            <Label htmlFor="perm-view-students">Can View All Students</Label>
-            <Switch
-              id="perm-view-students"
-              checked={permissions.can_view_students}
-              onCheckedChange={(checked) => setPermissions({ ...permissions, can_view_students: checked })}
-            />
-          </div>
-        </div>
-      </div>
-
-      <Button type="submit" className="w-full">
-        Create Agent
+      <Button type="submit" disabled={loading} className="w-full">
+        {loading ? "Creating..." : "Create Agent"}
       </Button>
     </form>
   )

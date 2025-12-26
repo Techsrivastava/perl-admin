@@ -1,13 +1,14 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { CheckCircle, XCircle, Download, FileText, DollarSign } from "lucide-react"
+import { CheckCircle, XCircle, Download, FileText, DollarSign, Loader2 } from "lucide-react"
 import { Separator } from "@/components/ui/separator"
+import { createClient } from "@/lib/supabase"
 
 interface FeeApprovalModalProps {
   submissionId: string
@@ -15,283 +16,350 @@ interface FeeApprovalModalProps {
 }
 
 export function FeeApprovalModal({ submissionId, onSuccess }: FeeApprovalModalProps) {
+  const [submission, setSubmission] = useState<any>(null)
   const [action, setAction] = useState<"approve" | "reject" | null>(null)
   const [notes, setNotes] = useState("")
   const [loading, setLoading] = useState(false)
+  const [fetching, setFetching] = useState(true)
 
-  // Mock data - replace with actual API call
-  const submission = {
-    id: submissionId,
-    admission_id: "ADM001",
-    student_name: "Rahul Sharma",
-    course_name: "B.Tech Computer Science",
-    agent_name: "Rajesh Kumar",
-    agent_code: "AGT001",
-    amount_received: 480000,
-    payment_mode: "UPI",
-    payment_date: "2024-01-15",
-    transaction_id: "TXN123456789",
-    payment_proofs: [
-      { name: "receipt.pdf", url: "#" },
-      { name: "bank_statement.jpg", url: "#" },
-    ],
-    agent_notes: "Full payment received via UPI",
-    agreed_fee: 480000,
-    university_fee: 400000,
-    actual_profit: 80000,
-    agent_commission_percent: 10,
-    agent_commission: 8000,
-    agent_expenses: 2000,
-    agent_final: 10000,
-    consultancy_expenses: 5000,
-    consultancy_net: 65000,
-    submitted_date: "2024-01-15T10:30:00",
-    status: "pending",
+  const supabase = createClient()
+
+  useEffect(() => {
+    if (submissionId) loadSubmission()
+  }, [submissionId])
+
+  const loadSubmission = async () => {
+    try {
+      setFetching(true)
+      const { data, error } = await supabase
+        .from('fee_submissions')
+        .select(`
+          *,
+          admissions (
+            id,
+            student_name,
+            total_fee,
+            fee_paid,
+            university_id,
+            consultancy_id,
+            agent_id,
+            university_courses (
+               university_fee,
+               commission_value,
+               master_courses ( name )
+            ),
+            consultancies ( name, commission_type, commission_value ),
+            agents ( name, commission_rate )
+          )
+        `)
+        .eq('id', submissionId)
+        .single()
+
+      if (error) throw error
+      setSubmission(data)
+    } catch (err: any) {
+      console.error("Error loading submission:", err)
+    } finally {
+      setFetching(false)
+    }
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleProcess = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!action) return
-
+    if (!action || !submission) return
     setLoading(true)
 
     try {
-      const response = await fetch(`/api/fee-submissions/${submissionId}/${action}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ notes }),
-      })
+      const { data: { user } } = await supabase.auth.getUser()
 
-      if (response.ok) {
-        onSuccess?.()
+      if (action === 'reject') {
+        const { error } = await supabase
+          .from('fee_submissions')
+          .update({
+            status: 'rejected',
+            rejection_reason: notes,
+            reviewed_by_id: user?.id,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', submissionId)
+        if (error) throw error
+      } else {
+        // APPROVE LOGIC
+        const amount = submission.amount_received
+        const admission = submission.admissions
+
+        // 1. Update Admission Fee Paid
+        const { error: admError } = await supabase
+          .from('admissions')
+          .update({
+            fee_paid: (admission.fee_paid || 0) + amount,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', admission.id)
+        if (admError) throw admError
+
+        // 2. Calculate Financials
+        const universityFee = admission.university_courses?.university_fee || 0
+        const totalCommissionPool = amount - universityFee
+
+        // Agent Commission
+        let agentComm = 0
+        if (admission.agent_id && admission.agents?.commission_rate) {
+          agentComm = (totalCommissionPool * (admission.agents.commission_rate / 100))
+        }
+
+        // 3. Create Ledger Entries (Trigger will update wallets)
+
+        // entry for University (Credit Fee)
+        await supabase.from('ledger').insert({
+          entity_id: admission.university_id,
+          entity_type: 'university',
+          transaction_type: 'credit',
+          amount: universityFee,
+          purpose: 'admission_fee',
+          reference_id: admission.id,
+          reference_type: 'admission',
+          description: `Fee received for student: ${admission.student_name}`
+        })
+
+        // entry for Agent (Credit Commission)
+        if (admission.agent_id && agentComm > 0) {
+          await supabase.from('ledger').insert({
+            entity_id: admission.agent_id,
+            entity_type: 'agent',
+            transaction_type: 'credit',
+            amount: agentComm,
+            purpose: 'commission',
+            reference_id: admission.id,
+            reference_type: 'admission',
+            description: `Commission for student: ${admission.student_name}`
+          })
+        }
+
+        // entry for Consultancy (Credit remaining profit)
+        const consultProfit = totalCommissionPool - agentComm
+        if (admission.consultancy_id && consultProfit > 0) {
+          await supabase.from('ledger').insert({
+            entity_id: admission.consultancy_id,
+            entity_type: 'consultancy',
+            transaction_type: 'credit',
+            amount: consultProfit,
+            purpose: 'commission',
+            reference_id: admission.id,
+            reference_type: 'admission',
+            description: `Profit share for student: ${admission.student_name}`
+          })
+        }
+
+        // 4. Finalize Submission
+        const { error: subError } = await supabase
+          .from('fee_submissions')
+          .update({
+            status: 'approved',
+            reviewed_by_id: user?.id,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', submissionId)
+        if (subError) throw subError
       }
-    } catch (error) {
+
+      alert(`Submission ${action}ed successfully!`)
+      onSuccess?.()
+    } catch (error: any) {
       console.error("Failed to process approval:", error)
+      alert("Error: " + error.message)
     } finally {
       setLoading(false)
     }
   }
 
+  if (fetching) return (
+    <div className="flex flex-col items-center justify-center p-20 space-y-4">
+      <Loader2 className="w-10 h-10 animate-spin text-primary" />
+      <p className="text-muted-foreground animate-pulse">Loading submission details...</p>
+    </div>
+  )
+
+  if (!submission) return <div className="p-10 text-center">Submission not found</div>
+
+  const admission = submission.admissions
+  const universityFee = admission.university_courses?.university_fee || 0
+  const profitPool = submission.amount_received - universityFee
+  const agentRate = admission.agents?.commission_rate || 0
+  const agentComm = (profitPool * (agentRate / 100))
+  const consultancyNet = profitPool - agentComm
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 max-h-[75vh] overflow-y-auto px-1">
-      {/* Header */}
-      <div>
-        <h3 className="text-lg font-semibold mb-2 flex items-center gap-2">
-          <DollarSign className="w-5 h-5 text-primary" />
-          Approve Fee Submission
-        </h3>
-        <p className="text-sm text-muted-foreground">Review and approve agent's fee submission</p>
+    <form onSubmit={handleProcess} className="space-y-6 max-h-[85vh] overflow-y-auto px-2 scrollbar-hide pb-6">
+      <div className="flex items-center justify-between sticky top-0 bg-background pt-2 z-10 pb-4 border-b">
+        <div>
+          <h3 className="text-2xl font-bold font-heading flex items-center gap-2">
+            <DollarSign className="w-8 h-8 text-primary bg-primary/10 p-1.5 rounded-full" />
+            Review Payment
+          </h3>
+          <p className="text-sm text-muted-foreground mt-0.5">Check details before approving credit</p>
+        </div>
+        <Badge variant={submission.status === 'pending' ? 'secondary' : 'outline'} className="text-sm px-3 py-1">
+          {submission.status.toUpperCase()}
+        </Badge>
       </div>
 
-      {/* Submission Details */}
-      <Card className="p-4">
-        <div className="flex items-center justify-between mb-4">
-          <h4 className="font-semibold">Submission Details</h4>
-          <Badge variant={submission.status === "pending" ? "default" : "secondary"}>
-            {submission.status.toUpperCase()}
-          </Badge>
-        </div>
-        <div className="grid grid-cols-2 gap-3 text-sm">
-          <div>
-            <p className="text-muted-foreground">Submission ID</p>
-            <p className="font-medium">{submission.id}</p>
-          </div>
-          <div>
-            <p className="text-muted-foreground">Admission ID</p>
-            <p className="font-medium">{submission.admission_id}</p>
-          </div>
-          <div>
-            <p className="text-muted-foreground">Student Name</p>
-            <p className="font-medium">{submission.student_name}</p>
-          </div>
-          <div>
-            <p className="text-muted-foreground">Course</p>
-            <p className="font-medium">{submission.course_name}</p>
-          </div>
-          <div>
-            <p className="text-muted-foreground">Agent Name</p>
-            <p className="font-medium">{submission.agent_name}</p>
-          </div>
-          <div>
-            <p className="text-muted-foreground">Agent Code</p>
-            <p className="font-medium">{submission.agent_code}</p>
-          </div>
-          <div>
-            <p className="text-muted-foreground">Submitted On</p>
-            <p className="font-medium">{new Date(submission.submitted_date).toLocaleString()}</p>
-          </div>
-        </div>
-      </Card>
-
-      {/* Payment Information */}
-      <Card className="p-4">
-        <h4 className="font-semibold mb-4">Payment Information</h4>
-        <div className="space-y-3">
-          <div className="flex justify-between p-2 bg-muted/50 rounded">
-            <span className="text-sm">Amount Received</span>
-            <span className="font-semibold">₹{submission.amount_received.toLocaleString()}</span>
-          </div>
-          <div className="flex justify-between p-2">
-            <span className="text-sm">Agreed Fee</span>
-            <span className="font-semibold">₹{submission.agreed_fee.toLocaleString()}</span>
-          </div>
-          {submission.amount_received !== submission.agreed_fee && (
-            <div className="flex justify-between p-2 bg-amber-50 border border-amber-200 rounded">
-              <span className="text-sm font-semibold text-amber-900">Difference</span>
-              <span className="font-semibold text-amber-900">
-                ₹{Math.abs(submission.amount_received - submission.agreed_fee).toLocaleString()}
-              </span>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="space-y-6">
+          {/* Submission Info */}
+          <Card className="p-5 border-muted shadow-sm ring-1 ring-black/5">
+            <h4 className="font-bold text-sm text-muted-foreground uppercase tracking-wider mb-4">Submission Context</h4>
+            <div className="grid grid-cols-2 gap-y-4 text-sm">
+              <div className="col-span-2 p-3 bg-muted/30 rounded-lg">
+                <p className="text-xs text-muted-foreground">Student Name</p>
+                <p className="font-bold text-lg">{admission.student_name}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Course</p>
+                <p className="font-semibold">{admission.university_courses?.master_courses?.name}</p>
+              </div>
+              <div>
+                <p className="text-xs text-muted-foreground">Admin ID</p>
+                <p className="font-mono text-xs">{admission.id.slice(0, 12)}...</p>
+              </div>
             </div>
+          </Card>
+
+          {/* Payment Details */}
+          <Card className="p-5 border-muted shadow-sm overflow-hidden ring-1 ring-black/5">
+            <div className="flex justify-between items-center mb-4">
+              <h4 className="font-bold text-sm text-muted-foreground uppercase tracking-wider">Payment Details</h4>
+              <Badge variant="outline" className="capitalize">{submission.payment_mode}</Badge>
+            </div>
+            <div className="space-y-4">
+              <div className="flex justify-between items-end p-4 bg-primary/5 rounded-xl border border-primary/10">
+                <div>
+                  <p className="text-xs text-primary/70 font-semibold mb-1">Amount to Credit</p>
+                  <p className="text-3xl font-black text-primary">₹{submission.amount_received.toLocaleString()}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-muted-foreground mb-1">Date Paid</p>
+                  <p className="font-bold">{new Date(submission.payment_date).toLocaleDateString()}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 text-sm px-1">
+                <div>
+                  <p className="text-xs text-muted-foreground">Transaction ID</p>
+                  <p className="font-mono font-bold break-all">{submission.transaction_id || "N/A"}</p>
+                </div>
+                {submission.notes && (
+                  <div className="col-span-2">
+                    <p className="text-xs text-muted-foreground">Submission Note</p>
+                    <p className="italic text-muted-foreground">"{submission.notes}"</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </Card>
+
+          {/* Proofs */}
+          <Card className="p-5 border-muted shadow-sm ring-1 ring-black/5">
+            <h4 className="font-bold text-sm text-muted-foreground uppercase tracking-wider mb-4 flex items-center justify-between">
+              Payment Proofs
+              <span className="text-xs lowercase">({submission.proof_urls?.length || 0} files)</span>
+            </h4>
+            <div className="grid grid-cols-1 gap-2">
+              {submission.proof_urls && submission.proof_urls.map((url: string, idx: number) => (
+                <a key={idx} href={url} target="_blank" rel="noreferrer" className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 transition-colors group">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-blue-50 text-blue-600 rounded">
+                      <FileText className="w-4 h-4" />
+                    </div>
+                    <span className="text-sm font-medium">Proof Document #{idx + 1}</span>
+                  </div>
+                  <Download className="w-4 h-4 text-muted-foreground group-hover:text-primary" />
+                </a>
+              ))}
+            </div>
+          </Card>
+        </div>
+
+        {/* Right Side: Financial Breakdown */}
+        <div className="space-y-6">
+          <Card className="p-5 border-primary/20 bg-primary/[0.02] shadow-sm ring-1 ring-primary/10">
+            <h4 className="font-bold text-sm text-primary uppercase tracking-wider mb-6 flex items-center gap-2">
+              <CheckCircle className="w-4 h-4" />
+              Settlement Breakdown
+            </h4>
+            <div className="space-y-4 text-sm">
+              <div className="flex justify-between items-center group">
+                <span className="text-muted-foreground">University Share</span>
+                <span className="font-bold">₹{universityFee.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between items-center group">
+                <span className="text-muted-foreground">Commission Pool</span>
+                <span className="font-bold text-green-600">₹{profitPool.toLocaleString()}</span>
+              </div>
+              <Separator className="bg-primary/10" />
+              <div className="flex justify-between items-center p-2 rounded-lg bg-white/50">
+                <div className="flex flex-col">
+                  <span className="text-xs text-muted-foreground">Agent ({agentRate}%)</span>
+                  <span className="font-medium">{admission.agents?.name}</span>
+                </div>
+                <span className="font-bold text-blue-600">₹{agentComm.toLocaleString()}</span>
+              </div>
+              <div className="flex justify-between items-center p-2 rounded-lg bg-white/50">
+                <div className="flex flex-col">
+                  <span className="text-xs text-muted-foreground">Consultancy</span>
+                  <span className="font-medium">{admission.consultancies?.name}</span>
+                </div>
+                <span className="font-bold text-purple-600">₹{consultancyNet.toLocaleString()}</span>
+              </div>
+
+              <div className="mt-4 p-3 bg-green-50 rounded-lg text-xs border border-green-100 flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                <span className="text-green-800 font-medium">Automatic wallet credits will be applied on approval.</span>
+              </div>
+            </div>
+          </Card>
+
+          {/* Action Form */}
+          {!action ? (
+            <div className="grid grid-cols-2 gap-4">
+              <Button variant="outline" className="h-12 font-bold border-red-200 text-red-600 hover:bg-red-50" onClick={() => setAction('reject')}>
+                <XCircle className="w-4 h-4 mr-2" /> Reject
+              </Button>
+              <Button className="h-12 font-bold bg-green-600 hover:bg-green-700 shadow-lg shadow-green-600/20" onClick={() => setAction('approve')}>
+                <CheckCircle className="w-4 h-4 mr-2" /> Approve Credit
+              </Button>
+            </div>
+          ) : (
+            <Card className="p-5 border-amber-200 bg-amber-50/20 animate-in slide-in-from-right-4">
+              <h4 className="font-bold mb-4 flex items-center gap-2">
+                {action === 'approve' ? <CheckCircle className="w-5 h-5 text-green-600" /> : <XCircle className="w-5 h-5 text-red-600" />}
+                Confirm {action}
+              </h4>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label className="text-xs font-bold uppercase">{action === 'approve' ? 'Internal Remarks' : 'Rejection Reason *'}</Label>
+                  <Textarea
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder={action === 'approve' ? "Optional notes for the record..." : "Explain why this payment is incorrect..."}
+                    required={action === 'reject'}
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="ghost" className="flex-1 font-bold" onClick={() => setAction(null)}>Back</Button>
+                  <Button
+                    className={`flex-1 font-bold ${action === 'approve' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}`}
+                    onClick={handleProcess}
+                    disabled={loading}
+                  >
+                    {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : `Final ${action}`}
+                  </Button>
+                </div>
+              </div>
+            </Card>
           )}
-          <Separator />
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <div>
-              <p className="text-muted-foreground">Payment Mode</p>
-              <p className="font-medium">{submission.payment_mode}</p>
-            </div>
-            <div>
-              <p className="text-muted-foreground">Payment Date</p>
-              <p className="font-medium">{submission.payment_date}</p>
-            </div>
-            <div className="col-span-2">
-              <p className="text-muted-foreground">Transaction ID</p>
-              <p className="font-medium">{submission.transaction_id || "N/A"}</p>
-            </div>
-          </div>
         </div>
-      </Card>
-
-      {/* Payment Proofs */}
-      <Card className="p-4">
-        <h4 className="font-semibold mb-3 flex items-center gap-2">
-          <FileText className="w-4 h-4" />
-          Payment Proofs
-        </h4>
-        <div className="space-y-2">
-          {submission.payment_proofs.map((proof, index) => (
-            <div key={index} className="flex items-center justify-between p-3 border rounded">
-              <div className="flex items-center gap-3">
-                <FileText className="w-4 h-4 text-muted-foreground" />
-                <span className="text-sm font-medium">{proof.name}</span>
-              </div>
-              <Button variant="ghost" size="sm">
-                <Download className="w-4 h-4" />
-              </Button>
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      {/* Financial Breakdown */}
-      <Card className="p-4 border-primary/50">
-        <h4 className="font-semibold mb-4">Financial Breakdown (Computed)</h4>
-        <div className="space-y-2 text-sm">
-          <div className="flex justify-between p-2">
-            <span>University Fee</span>
-            <span className="font-semibold">₹{submission.university_fee.toLocaleString()}</span>
-          </div>
-          <div className="flex justify-between p-2 bg-green-50 rounded">
-            <span className="font-semibold text-green-900">Actual Profit</span>
-            <span className="font-semibold text-green-900">₹{submission.actual_profit.toLocaleString()}</span>
-          </div>
-          <Separator />
-          <div className="flex justify-between p-2">
-            <span>Agent Commission ({submission.agent_commission_percent}%)</span>
-            <span className="font-semibold text-blue-600">₹{submission.agent_commission.toLocaleString()}</span>
-          </div>
-          <div className="flex justify-between p-2">
-            <span>Agent Expenses</span>
-            <span className="font-semibold">₹{submission.agent_expenses.toLocaleString()}</span>
-          </div>
-          <div className="flex justify-between p-2 bg-blue-50 rounded">
-            <span className="font-semibold text-blue-900">Agent Final Amount</span>
-            <span className="font-semibold text-blue-900">₹{submission.agent_final.toLocaleString()}</span>
-          </div>
-          <Separator />
-          <div className="flex justify-between p-2">
-            <span>Consultancy Expenses</span>
-            <span className="font-semibold">₹{submission.consultancy_expenses.toLocaleString()}</span>
-          </div>
-          <div className="flex justify-between p-2 bg-purple-50 rounded">
-            <span className="font-semibold text-purple-900">Consultancy Net Profit</span>
-            <span className="font-semibold text-purple-900">₹{submission.consultancy_net.toLocaleString()}</span>
-          </div>
-        </div>
-      </Card>
-
-      {/* Agent Notes */}
-      {submission.agent_notes && (
-        <Card className="p-4">
-          <h4 className="font-semibold mb-2">Agent's Notes</h4>
-          <p className="text-sm text-muted-foreground">{submission.agent_notes}</p>
-        </Card>
-      )}
-
-      <Separator />
-
-      {/* Action Section */}
-      {!action ? (
-        <div className="grid grid-cols-2 gap-3">
-          <Button
-            type="button"
-            variant="destructive"
-            className="flex items-center justify-center gap-2"
-            onClick={() => setAction("reject")}
-          >
-            <XCircle className="w-4 h-4" />
-            Reject
-          </Button>
-          <Button
-            type="button"
-            className="flex items-center justify-center gap-2"
-            onClick={() => setAction("approve")}
-          >
-            <CheckCircle className="w-4 h-4" />
-            Approve & Generate Receipt
-          </Button>
-        </div>
-      ) : (
-        <Card className="p-4">
-          <h4 className="font-semibold mb-3 capitalize">{action} Fee Submission</h4>
-          <div className="space-y-3">
-            <div>
-              <Label htmlFor="notes">
-                {action === "approve" ? "Approval Notes (Optional)" : "Rejection Reason *"}
-              </Label>
-              <Textarea
-                id="notes"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder={action === "approve" ? "Any additional notes" : "Provide reason for rejection"}
-                rows={3}
-                required={action === "reject"}
-              />
-            </div>
-
-            {action === "approve" && (
-              <div className="p-3 bg-green-50 border border-green-200 rounded text-sm">
-                <p className="font-semibold text-green-900 mb-1">Upon Approval:</p>
-                <ul className="text-green-700 space-y-1 list-disc list-inside">
-                  <li>Fee receipt will be generated</li>
-                  <li>Ledger entries will be created</li>
-                  <li>Wallet balances will be updated</li>
-                  <li>Agent will be notified</li>
-                  <li>University will be notified (if applicable)</li>
-                </ul>
-              </div>
-            )}
-
-            <div className="flex gap-3">
-              <Button type="button" variant="outline" className="flex-1" onClick={() => setAction(null)}>
-                Cancel
-              </Button>
-              <Button type="submit" className="flex-1" disabled={loading}>
-                {loading ? "Processing..." : `Confirm ${action}`}
-              </Button>
-            </div>
-          </div>
-        </Card>
-      )}
+      </div>
     </form>
   )
 }

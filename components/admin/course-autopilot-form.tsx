@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { GraduationCap, Sparkles, AlertCircle, DollarSign, ChevronDown, ChevronRight, Settings, Eye } from "lucide-react"
+import { createClient } from "@/lib/supabase"
 
 interface CourseAutopilotFormProps {
   onSuccess?: () => void
@@ -85,56 +86,23 @@ export function CourseAutopilotForm({ onSuccess, editMode = false, courseData }:
 
   const [loading, setLoading] = useState(false)
 
+
+
   useEffect(() => {
     loadMasterCourses()
     loadUniversities()
-    if (editMode && courseData) {
-      // Load existing course data for editing
-      setFormData(prev => ({
-        ...prev,
-        // Load course data here
-      }))
-    }
-  }, [editMode, courseData])
+  }, [])
 
   const loadMasterCourses = async () => {
-    try {
-      const response = await fetch('https://perl-backend-env.up.railway.app/courses/master', {
-        headers: { 'Content-Type': 'application/json' }
-      })
-      if (response.ok) {
-        const data = await response.json()
-        setMasterCourses(data.courses || data)
-      } else {
-        console.error('Failed to load master courses')
-        setMasterCourses([])
-      }
-    } catch (error) {
-      console.error('Error loading master courses:', error)
-      setMasterCourses([])
-    }
+    const supabase = createClient()
+    const { data } = await supabase.from('master_courses').select('*')
+    if (data) setMasterCourses(data)
   }
 
   const loadUniversities = async () => {
-    const token = localStorage.getItem('token')
-    if (!token) return
-    try {
-      const response = await fetch('https://perl-backend-env.up.railway.app/api/universities', {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-      if (response.ok) {
-        const data = await response.json()
-        const universitiesData = data.data?.universities || data.universities || data || []
-        if (!Array.isArray(universitiesData)) {
-          setUniversities([])
-        } else {
-          const uniqueUniversities = universitiesData.filter((u, index, arr) => arr.findIndex(u2 => u2.id === u.id) === index)
-          setUniversities(uniqueUniversities)
-        }
-      }
-    } catch (error) {
-      console.error('Failed to load universities:', error)
-    }
+    const supabase = createClient()
+    const { data } = await supabase.from('universities').select('id, name')
+    if (data) setUniversities(data)
   }
 
   const toggleSection = (section: keyof typeof expandedSections) => {
@@ -149,61 +117,43 @@ export function CourseAutopilotForm({ onSuccess, editMode = false, courseData }:
     setLoading(true)
 
     try {
-      // Validate required fields
       if (!formData.selectedMasterCourseId) {
         alert('Please select a master course')
         setLoading(false)
         return
       }
 
-      if (!formData.intakeCapacity || !formData.totalCourseFee) {
-        alert('Please fill in intake capacity and total course fee')
+      if (formData.universityIds.length === 0) {
+        alert('Please select at least one university')
         setLoading(false)
         return
       }
 
-      const token = localStorage.getItem('token')
-      const url = editMode ? `https://perl-backend-env.up.railway.app/api/courses/${courseData?.id}` : 'https://perl-backend-env.up.railway.app/api/courses'
+      const supabase = createClient()
+      const inserts = formData.universityIds.map(uniId => ({
+        university_id: uniId,
+        master_course_id: formData.selectedMasterCourseId,
+        university_fee: parseFloat(formData.totalCourseFee) || 0,
+        display_fee: (parseFloat(formData.totalCourseFee) || 0) * 1.2, // Dummy margin logic
+        intake_capacity: parseInt(formData.intakeCapacity) || 0,
+        mode_of_study: formData.courseMode,
+        is_active: formData.showOnApp,
+        metadata: {
+          description: formData.customDescription,
+          admission_types: formData.selectedAdmissionTypes,
+          required_documents: formData.requiredDocuments,
+          duration: formData.courseDuration
+        }
+      }))
 
-      const backendData = {
-        // Transform frontend data to backend format
-        name: formData.selectedMasterCourseId ? masterCourses.find(c => c.id === formData.selectedMasterCourseId)?.name : '',
-        abbreviation: `CS-${Date.now().toString().slice(-4)}`,
-        code: `COURSE-${Date.now()}`,
-        department: masterCourses.find(c => c.id === formData.selectedMasterCourseId)?.department || '',
-        degreeType: masterCourses.find(c => c.id === formData.selectedMasterCourseId)?.level === 'UG' ? 'UG' : 'PG',
-        duration: formData.courseDuration,
-        modeOfStudy: formData.courseMode,
-        level: masterCourses.find(c => c.id === formData.selectedMasterCourseId)?.level?.toLowerCase() || 'ug',
-        fees: parseFloat(formData.totalCourseFee) || 0,
-        totalSeats: parseInt(formData.intakeCapacity) || 0,
-        availableSeats: parseInt(formData.availableSeats) || parseInt(formData.intakeCapacity) || 0,
-        description: formData.customDescription,
-        eligibility: masterCourses.find(c => c.id === formData.selectedMasterCourseId)?.eligibility || [],
-        isActive: formData.showOnApp,
-        status: formData.courseStatus.toLowerCase(),
-        ...(formData.universityIds.length > 0 && { universityIds: formData.universityIds }),
-      }
+      const { error } = await supabase.from('university_courses').insert(inserts)
 
-      const response = await fetch(url, {
-        method: editMode ? "PUT" : "POST",
-        headers: {
-          "Content-Type": "application/json",
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify(backendData),
-      })
+      if (error) throw error
 
-      if (response.ok) {
-        const result = await response.json()
-        onSuccess?.()
-      } else {
-        const errorText = await response.text()
-        alert(`Failed to ${editMode ? 'update' : 'create'} course: ${errorText}`)
-      }
-    } catch (error) {
-      console.error("Failed to save course:", error)
-      alert(`Failed to ${editMode ? 'update' : 'create'} course`)
+      onSuccess?.()
+    } catch (error: any) {
+      console.error("Failed to save course mapping:", error)
+      alert(`Failed to save course: ${error.message}`)
     } finally {
       setLoading(false)
     }
@@ -322,87 +272,87 @@ export function CourseAutopilotForm({ onSuccess, editMode = false, courseData }:
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-4 space-y-4">
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                    <div>
-                      <Label htmlFor="course_mode">Course Mode *</Label>
-                      <Select value={formData.courseMode} onValueChange={(value) => setFormData({ ...formData, courseMode: value })}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Regular">Regular</SelectItem>
-                          <SelectItem value="Distance">Distance</SelectItem>
-                          <SelectItem value="Online">Online</SelectItem>
-                          <SelectItem value="Part-Time">Part-Time</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <div>
+                    <Label htmlFor="course_mode">Course Mode *</Label>
+                    <Select value={formData.courseMode} onValueChange={(value) => setFormData({ ...formData, courseMode: value })}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Regular">Regular</SelectItem>
+                        <SelectItem value="Distance">Distance</SelectItem>
+                        <SelectItem value="Online">Online</SelectItem>
+                        <SelectItem value="Part-Time">Part-Time</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-                    <div className="lg:col-span-2">
-                      <Label htmlFor="description">Custom Course Description</Label>
-                      <Textarea
-                        id="description"
-                        value={formData.customDescription}
-                        onChange={(e) => setFormData({ ...formData, customDescription: e.target.value })}
-                        placeholder="Add specific highlights of your program"
-                        rows={3}
-                      />
-                    </div>
+                  <div className="lg:col-span-2">
+                    <Label htmlFor="description">Custom Course Description</Label>
+                    <Textarea
+                      id="description"
+                      value={formData.customDescription}
+                      onChange={(e) => setFormData({ ...formData, customDescription: e.target.value })}
+                      placeholder="Add specific highlights of your program"
+                      rows={3}
+                    />
+                  </div>
 
-                    <div>
-                      <Label htmlFor="intake">Intake Capacity *</Label>
-                      <Input
-                        id="intake"
-                        type="number"
-                        value={formData.intakeCapacity}
-                        onChange={(e) => setFormData({ ...formData, intakeCapacity: e.target.value })}
-                        placeholder="120"
-                      />
-                    </div>
+                  <div>
+                    <Label htmlFor="intake">Intake Capacity *</Label>
+                    <Input
+                      id="intake"
+                      type="number"
+                      value={formData.intakeCapacity}
+                      onChange={(e) => setFormData({ ...formData, intakeCapacity: e.target.value })}
+                      placeholder="120"
+                    />
+                  </div>
 
-                    <div>
-                      <Label htmlFor="available">Available Seats</Label>
-                      <Input
-                        id="available"
-                        type="number"
-                        value={formData.availableSeats}
-                        onChange={(e) => setFormData({ ...formData, availableSeats: e.target.value })}
-                        placeholder="100"
-                      />
-                    </div>
+                  <div>
+                    <Label htmlFor="available">Available Seats</Label>
+                    <Input
+                      id="available"
+                      type="number"
+                      value={formData.availableSeats}
+                      onChange={(e) => setFormData({ ...formData, availableSeats: e.target.value })}
+                      placeholder="100"
+                    />
+                  </div>
 
-                    <div className="lg:col-span-1">
-                      <Label className="text-base font-medium">Admission Types</Label>
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        {['Merit', 'Entrance', 'Direct', 'Management Quota'].map((type) => (
-                          <div key={type} className="flex items-center space-x-2">
-                            <Checkbox
-                              id={type}
-                              checked={formData.selectedAdmissionTypes.includes(type)}
-                              onCheckedChange={(checked) => {
-                                if (checked) {
-                                  setFormData({
-                                    ...formData,
-                                    selectedAdmissionTypes: [...formData.selectedAdmissionTypes, type]
-                                  })
-                                } else {
-                                  setFormData({
-                                    ...formData,
-                                    selectedAdmissionTypes: formData.selectedAdmissionTypes.filter(t => t !== type)
-                                  })
-                                }
-                              }}
-                            />
-                            <Label htmlFor={type} className="text-sm">{type}</Label>
-                          </div>
-                        ))}
-                      </div>
+                  <div className="lg:col-span-1">
+                    <Label className="text-base font-medium">Admission Types</Label>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {['Merit', 'Entrance', 'Direct', 'Management Quota'].map((type) => (
+                        <div key={type} className="flex items-center space-x-2">
+                          <Checkbox
+                            id={type}
+                            checked={formData.selectedAdmissionTypes.includes(type)}
+                            onCheckedChange={(checked) => {
+                              if (checked) {
+                                setFormData({
+                                  ...formData,
+                                  selectedAdmissionTypes: [...formData.selectedAdmissionTypes, type]
+                                })
+                              } else {
+                                setFormData({
+                                  ...formData,
+                                  selectedAdmissionTypes: formData.selectedAdmissionTypes.filter(t => t !== type)
+                                })
+                              }
+                            }}
+                          />
+                          <Label htmlFor={type} className="text-sm">{type}</Label>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                </CardContent>
-              </CollapsibleContent>
-            </Collapsible>
-          </Card>
+                </div>
+              </CardContent>
+            </CollapsibleContent>
+          </Collapsible>
+        </Card>
 
         {/* SECTION 3: Fee Structure */}
         <Card>
@@ -421,49 +371,49 @@ export function CourseAutopilotForm({ onSuccess, editMode = false, courseData }:
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-4 space-y-4">
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-                    <div>
-                      <Label htmlFor="total_fee">Total Course Fee (₹) *</Label>
-                      <Input
-                        id="total_fee"
-                        type="number"
-                        value={formData.totalCourseFee}
-                        onChange={(e) => setFormData({ ...formData, totalCourseFee: e.target.value })}
-                        placeholder="400000"
-                      />
-                    </div>
-
-                    <div>
-                      <Label htmlFor="duration">Course Duration (Years) *</Label>
-                      <Input
-                        id="duration"
-                        type="number"
-                        value={formData.courseDuration}
-                        onChange={(e) => setFormData({ ...formData, courseDuration: e.target.value })}
-                        placeholder="4"
-                      />
-                    </div>
-
-                    <div className="lg:col-span-2">
-                      {formData.totalCourseFee && formData.courseDuration && (
-                        <div className="p-4 bg-green-50 border border-green-200 rounded-lg h-full flex items-center">
-                          <div>
-                            <p className="text-sm font-medium text-green-800">Per Year Fee Calculation</p>
-                            <p className="text-lg font-bold text-green-900">
-                              ₹{((parseFloat(formData.totalCourseFee) || 0) / parseInt(formData.courseDuration)).toLocaleString()}
-                            </p>
-                            <p className="text-xs text-green-700 mt-1">
-                              Total: ₹{formData.totalCourseFee} ÷ {formData.courseDuration} years
-                            </p>
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                  <div>
+                    <Label htmlFor="total_fee">Total Course Fee (₹) *</Label>
+                    <Input
+                      id="total_fee"
+                      type="number"
+                      value={formData.totalCourseFee}
+                      onChange={(e) => setFormData({ ...formData, totalCourseFee: e.target.value })}
+                      placeholder="400000"
+                    />
                   </div>
-                </CardContent>
-              </CollapsibleContent>
-            </Collapsible>
-          </Card>
+
+                  <div>
+                    <Label htmlFor="duration">Course Duration (Years) *</Label>
+                    <Input
+                      id="duration"
+                      type="number"
+                      value={formData.courseDuration}
+                      onChange={(e) => setFormData({ ...formData, courseDuration: e.target.value })}
+                      placeholder="4"
+                    />
+                  </div>
+
+                  <div className="lg:col-span-2">
+                    {formData.totalCourseFee && formData.courseDuration && (
+                      <div className="p-4 bg-green-50 border border-green-200 rounded-lg h-full flex items-center">
+                        <div>
+                          <p className="text-sm font-medium text-green-800">Per Year Fee Calculation</p>
+                          <p className="text-lg font-bold text-green-900">
+                            ₹{((parseFloat(formData.totalCourseFee) || 0) / parseInt(formData.courseDuration)).toLocaleString()}
+                          </p>
+                          <p className="text-xs text-green-700 mt-1">
+                            Total: ₹{formData.totalCourseFee} ÷ {formData.courseDuration} years
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </CollapsibleContent>
+          </Collapsible>
+        </Card>
 
         {/* SECTION 4: Documents & Settings */}
         <Card>
@@ -482,7 +432,7 @@ export function CourseAutopilotForm({ onSuccess, editMode = false, courseData }:
             </CollapsibleTrigger>
             <CollapsibleContent>
               <CardContent className="pt-4 space-y-4">
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   <div className="lg:col-span-2">
                     <Label className="text-base font-medium">Required Documents</Label>
                     <div className="flex flex-wrap gap-3 mt-2">

@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
+import { createClient } from "@/lib/supabase"
 
 interface MapCourseUniversityModalProps {
   onSuccess?: () => void
@@ -49,48 +50,23 @@ export function MapCourseUniversityModal({ onSuccess }: MapCourseUniversityModal
 
   const [loading, setLoading] = useState(false)
 
+
+
   useEffect(() => {
     loadCourses()
     loadUniversities()
   }, [])
 
   const loadCourses = async () => {
-    const token = localStorage.getItem('token')
-    if (!token) return
-    try {
-      const response = await fetch('https://perl-backend-env.up.railway.app/api/courses', {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-      if (response.ok) {
-        const data = await response.json()
-        const coursesData = data.success ? data.data : data
-        setCourses(Array.isArray(coursesData) ? coursesData : [])
-      }
-    } catch (error) {
-      console.error('Failed to load courses:', error)
-    }
+    const supabase = createClient()
+    const { data } = await supabase.from('master_courses').select('id, name')
+    if (data) setCourses(data)
   }
 
   const loadUniversities = async () => {
-    const token = localStorage.getItem('token')
-    if (!token) return
-    try {
-      const response = await fetch('https://perl-backend-env.up.railway.app/api/universities', {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-      if (response.ok) {
-        const data = await response.json()
-        const universitiesData = data.data?.universities || data.universities || data || []
-        if (!Array.isArray(universitiesData)) {
-          setUniversities([])
-        } else {
-          const uniqueUniversities = universitiesData.filter((u, index, arr) => arr.findIndex(u2 => u2.id === u.id) === index)
-          setUniversities(uniqueUniversities)
-        }
-      }
-    } catch (error) {
-      console.error('Failed to load universities:', error)
-    }
+    const supabase = createClient()
+    const { data } = await supabase.from('universities').select('id, name')
+    if (data) setUniversities(data)
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -98,41 +74,38 @@ export function MapCourseUniversityModal({ onSuccess }: MapCourseUniversityModal
     setLoading(true)
 
     try {
-      const token = localStorage.getItem('token')
-      
-      // First, fetch the current course
-      const getResponse = await fetch(`https://perl-backend-env.up.railway.app/api/courses/${formData.course_id}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      })
-      
-      if (!getResponse.ok) {
-        throw new Error('Failed to fetch course')
-      }
-      
-      const currentCourse = await getResponse.json()
-      const currentCourseData = currentCourse.success ? currentCourse.data : currentCourse
-      
-      // Update universityIds
-      const currentUniversityIds = currentCourseData.universityIds || []
-      const updatedUniversityIds = [...new Set([...currentUniversityIds, formData.university_id])]
-      
-      // PUT the updated course
-      const putResponse = await fetch(`https://perl-backend-env.up.railway.app/api/courses/${formData.course_id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ universityIds: updatedUniversityIds }),
-      })
+      const supabase = createClient()
 
-      if (putResponse.ok) {
-        onSuccess?.()
-      } else {
-        throw new Error('Failed to update course')
+      const insertData = {
+        university_id: formData.university_id,
+        master_course_id: formData.course_id,
+        university_fee: parseFloat(formData.university_fee) || 0,
+        display_fee: parseFloat(formData.student_display_fee) || 0,
+        commission_type: formData.consultancy_share_type,
+        commission_value: parseFloat(formData.consultancy_share_value) || 0,
+        intake_capacity: parseInt(formData.total_seats) || 0,
+        seats_filled: parseInt(formData.total_seats) - parseInt(formData.available_seats) || 0, // Inferred
+        fee_structure: {
+          one_time_fees: oneTimeFees.filter(f => f.selected).map(f => ({
+            name: f.name,
+            amount: parseFloat(f.amount),
+            mandatory: f.mandatory
+          })),
+          auto_split: formData.auto_split_fee
+        },
+        is_active: true
       }
-    } catch (error) {
+
+      const { error } = await supabase
+        .from('university_courses')
+        .insert(insertData)
+
+      if (error) throw error
+
+      onSuccess?.()
+    } catch (error: any) {
       console.error('Failed to map course:', error)
+      alert(`Failed to map course: ${error.message}`)
     } finally {
       setLoading(false)
     }
@@ -309,7 +282,7 @@ export function MapCourseUniversityModal({ onSuccess }: MapCourseUniversityModal
       <div className="space-y-4">
         <h4 className="font-semibold">One-time Fees Selection</h4>
         <p className="text-sm text-muted-foreground">Select applicable one-time fees and mark as mandatory/optional</p>
-        
+
         <div className="space-y-3">
           {oneTimeFees.map((fee) => (
             <Card key={fee.id} className="p-3">

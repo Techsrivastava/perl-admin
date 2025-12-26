@@ -1,55 +1,66 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useSession } from "next-auth/react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Download, TrendingUp, TrendingDown, Settings } from "lucide-react"
+import { Download, TrendingUp, TrendingDown, Settings, Wallet, ArrowUpRight, ArrowDownLeft, Loader2 } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { WalletAdjustmentModal } from "@/components/admin/wallet-adjustment-modal"
+import { createClient } from "@/lib/supabase"
+import { Badge } from "@/components/ui/badge"
 
 export default function WalletPage() {
-  const { data: session } = useSession()
   const [adjustmentDialogOpen, setAdjustmentDialogOpen] = useState(false)
   const [walletSummary, setWalletSummary] = useState({
     university_total: 0,
     consultancy_total: 0,
     agent_total: 0,
-    super_admin_total: 0,
+    system_total: 0,
   })
-  const [transactions, setTransactions] = useState([])
+  const [transactions, setTransactions] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Load wallet data on component mount
+  const supabase = createClient()
+
   useEffect(() => {
-    if (session?.accessToken) {
-      loadWalletData()
-    }
-  }, [session])
+    loadWalletData()
+  }, [])
 
   const loadWalletData = async () => {
     try {
       setLoading(true)
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://perl-backend-env.up.railway.app/api/'
-      const response = await fetch(`${backendUrl}/api/wallet`, {
-        headers: {
-          'Authorization': `Bearer ${session?.accessToken}`,
-        },
+
+      // 1. Fetch Summary Totals (Aggregating client side for simplicity, ideally a RPC or View)
+      const { data: uniData } = await supabase.from('universities').select('wallet_balance')
+      const { data: consData } = await supabase.from('consultancies').select('wallet_balance')
+      const { data: agentData } = await supabase.from('agents').select('wallet_balance')
+
+      const uniTotal = (uniData || []).reduce((sum, u) => sum + (u.wallet_balance || 0), 0)
+      const consTotal = (consData || []).reduce((sum, c) => sum + (c.wallet_balance || 0), 0)
+      const agentTotal = (agentData || []).reduce((sum, a) => sum + (a.wallet_balance || 0), 0)
+
+      setWalletSummary({
+        university_total: uniTotal,
+        consultancy_total: consTotal,
+        agent_total: agentTotal,
+        system_total: uniTotal + consTotal + agentTotal // Example logic
       })
-      if (response.ok) {
-        const data = await response.json()
-        // Assuming backend returns data directly or wrapped in success response
-        const walletData = data.success ? data.data : data
-        setWalletSummary(walletData.summary || walletSummary)
-        setTransactions(walletData.transactions || [])
-      } else {
-        setError('Failed to load wallet data')
-      }
-    } catch (error) {
+
+      // 2. Fetch Transactions (Ledger)
+      const { data: ledgerData, error: ledgerError } = await supabase
+        .from('ledger')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(50)
+
+      if (ledgerError) throw ledgerError
+      setTransactions(ledgerData || [])
+
+    } catch (error: any) {
       console.error('Error loading wallet data:', error)
-      setError('Failed to load wallet data')
+      setError(error.message)
     } finally {
       setLoading(false)
     }
@@ -58,109 +69,128 @@ export default function WalletPage() {
   return (
     <div className="p-8 space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Wallet & Ledger Management</h1>
-        <div className="flex gap-2">
+        <div>
+          <h1 className="text-3xl font-bold font-heading flex items-center gap-3">
+            <Wallet className="w-8 h-8 text-primary" />
+            Wallet & Ledger
+          </h1>
+          <p className="text-muted-foreground mt-1">Monitor digital balances and financial flows</p>
+        </div>
+        <div className="flex gap-3">
           <Dialog open={adjustmentDialogOpen} onOpenChange={setAdjustmentDialogOpen}>
             <DialogTrigger asChild>
-              <Button variant="outline" className="gap-2">
+              <Button variant="outline" className="gap-2 border-primary/20 hover:bg-primary/5">
                 <Settings className="w-4 h-4" />
                 Adjust Wallet
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-3xl">
+            <DialogContent className="max-w-4xl">
               <DialogHeader>
-                <DialogTitle>Wallet Adjustment</DialogTitle>
+                <DialogTitle className="text-2xl font-bold font-heading">Wallet Correction Utility</DialogTitle>
               </DialogHeader>
-              <WalletAdjustmentModal 
+              <WalletAdjustmentModal
                 onSuccess={() => {
                   setAdjustmentDialogOpen(false)
-                  loadWalletData() // Reload wallet data
-                  alert('Wallet adjusted successfully!')
-                }} 
+                  loadWalletData()
+                  alert('Adjustment complete!')
+                }}
               />
             </DialogContent>
           </Dialog>
-          <Button className="gap-2">
+          <Button className="gap-2 bg-primary hover:bg-primary/90">
             <Download className="w-4 h-4" />
-            Export Report
+            Export Audit Log
           </Button>
         </div>
       </div>
 
       {/* Wallet Summary */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="p-6">
-          <p className="text-sm text-muted-foreground mb-2">Universities Total</p>
-          <p className="text-2xl font-bold">₹{(walletSummary.university_total / 100000).toFixed(1)}L</p>
-        </Card>
-        <Card className="p-6">
-          <p className="text-sm text-muted-foreground mb-2">Consultancies Total</p>
-          <p className="text-2xl font-bold">₹{(walletSummary.consultancy_total / 100000).toFixed(1)}L</p>
-        </Card>
-        <Card className="p-6">
-          <p className="text-sm text-muted-foreground mb-2">Agents Total</p>
-          <p className="text-2xl font-bold">₹{(walletSummary.agent_total / 100000).toFixed(1)}L</p>
-        </Card>
-        <Card className="p-6 bg-primary text-primary-foreground">
-          <p className="text-sm opacity-90 mb-2">System Total</p>
-          <p className="text-2xl font-bold">₹{(walletSummary.super_admin_total / 100000).toFixed(1)}L</p>
-        </Card>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        {[
+          { label: 'Universities', val: walletSummary.university_total, color: 'text-blue-600', bg: 'bg-blue-50' },
+          { label: 'Consultancies', val: walletSummary.consultancy_total, color: 'text-purple-600', bg: 'bg-purple-50' },
+          { label: 'Agents', val: walletSummary.agent_total, color: 'text-green-600', bg: 'bg-green-50' },
+          { label: 'Network Total', val: walletSummary.system_total, color: 'text-white', bg: 'bg-primary' },
+        ].map((card, i) => (
+          <Card key={i} className={`p-6 border-none shadow-sm ${card.bg}`}>
+            <p className={`text-sm font-semibold mb-2 ${card.color === 'text-white' ? 'text-white/80' : 'text-muted-foreground'}`}>{card.label}</p>
+            <p className={`text-3xl font-black ${card.color}`}>₹{card.val.toLocaleString()}</p>
+          </Card>
+        ))}
       </div>
 
       {/* Transaction Ledger */}
-      <Card className="p-6">
-        <h3 className="text-lg font-semibold mb-4">Recent Transactions</h3>
-        {loading ? (
-          <div className="text-center py-8">Loading transactions...</div>
-        ) : error ? (
-          <div className="text-center py-8 text-red-600">{error}</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="border-b border-border">
-                  <TableHead>Type</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Amount</TableHead>
-                  <TableHead>Direction</TableHead>
-                  <TableHead>Date</TableHead>
+      <Card className="border-none shadow-md overflow-hidden bg-white/50 backdrop-blur-sm">
+        <div className="p-6 border-b flex justify-between items-center">
+          <h3 className="text-xl font-bold font-heading">Recent Transactions Audit</h3>
+          <Button variant="ghost" size="sm" onClick={loadWalletData} disabled={loading}>
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Refresh Data"}
+          </Button>
+        </div>
+
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader className="bg-muted/30">
+              <TableRow>
+                <TableHead className="font-bold">Entity</TableHead>
+                <TableHead className="font-bold">Type</TableHead>
+                <TableHead className="font-bold">Amount</TableHead>
+                <TableHead className="font-bold">Flow</TableHead>
+                <TableHead className="font-bold">Purpose</TableHead>
+                <TableHead className="font-bold">Reference</TableHead>
+                <TableHead className="font-bold text-right">Date</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {loading && transactions.length === 0 ? (
+                <TableRow><TableCell colSpan={7} className="text-center py-20"><Loader2 className="w-8 h-8 animate-spin mx-auto opacity-20" /></TableCell></TableRow>
+              ) : transactions.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center py-12 text-muted-foreground italic">
+                    No financial records found.
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {transactions.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                      No transactions found.
+              ) : (
+                transactions.map((txn: any) => (
+                  <TableRow key={txn.id} className="hover:bg-muted/10 transition-colors">
+                    <TableCell>
+                      <Badge variant="outline" className="capitalize text-[10px] font-bold tracking-tighter">
+                        {txn.entity_type}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-sm font-medium">{txn.transaction_type.toUpperCase()}</TableCell>
+                    <TableCell className={`font-black font-mono ${txn.transaction_type === 'credit' ? 'text-green-600' : 'text-red-500'}`}>
+                      {txn.transaction_type === 'credit' ? '+' : '-'}₹{txn.amount.toLocaleString()}
+                    </TableCell>
+                    <TableCell>
+                      {txn.transaction_type === "credit" ? (
+                        <div className="flex items-center gap-1 text-green-600 text-xs font-bold bg-green-50 px-2 py-0.5 rounded-full w-fit">
+                          <ArrowUpRight className="w-3 h-3" /> INFLOW
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1 text-red-600 text-xs font-bold bg-red-50 px-2 py-0.5 rounded-full w-fit">
+                          <ArrowDownLeft className="w-3 h-3" /> OUTFLOW
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs text-muted-foreground max-w-[200px] truncate" title={txn.description}>
+                      <span className="font-bold text-black opacity-80 uppercase text-[9px] block">
+                        {(txn.purpose || txn.reference_type || 'transaction').replace(/_/g, ' ')}
+                      </span>
+                      {txn.description}
+                    </TableCell>
+                    <TableCell className="font-mono text-[10px] text-muted-foreground">
+                      {txn.reference_id?.slice(0, 8) || 'SYSTEM'}
+                    </TableCell>
+                    <TableCell className="text-right text-[11px] font-medium text-muted-foreground">
+                      {new Date(txn.created_at).toLocaleString()}
                     </TableCell>
                   </TableRow>
-                ) : (
-                  transactions.map((txn: any) => (
-                    <TableRow key={txn.id} className="border-b border-border hover:bg-muted/50">
-                      <TableCell className="font-medium">{txn.type}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{txn.description}</TableCell>
-                      <TableCell className="font-semibold">₹{(txn.amount / 1000).toFixed(0)}K</TableCell>
-                      <TableCell>
-                        <div
-                          className={`flex items-center gap-1 ${
-                            txn.direction === "in" ? "text-green-600" : "text-red-600"
-                          }`}
-                        >
-                          {txn.direction === "in" ? (
-                            <TrendingUp className="w-4 h-4" />
-                          ) : (
-                            <TrendingDown className="w-4 h-4" />
-                          )}
-                          {txn.direction === "in" ? "Income" : "Expense"}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-sm">{txn.date}</TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        )}
+                ))
+              )}
+            </TableBody>
+          </Table>
+        </div>
       </Card>
     </div>
   )

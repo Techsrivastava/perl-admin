@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { createClient } from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -8,11 +9,11 @@ import { Textarea } from "@/components/ui/textarea"
 import { Separator } from "@/components/ui/separator"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { 
-  FileText, 
-  Download, 
-  CheckCircle, 
-  XCircle, 
+import {
+  FileText,
+  Download,
+  CheckCircle,
+  XCircle,
   AlertCircle,
   User,
   GraduationCap,
@@ -27,6 +28,7 @@ interface AdmissionReviewModalProps {
 }
 
 export function AdmissionReviewModal({ admissionId, studentName, onSuccess }: AdmissionReviewModalProps) {
+  const [admissionData, setAdmissionData] = useState<any>(null)
   const [action, setAction] = useState<"approve" | "reject" | "revert" | null>(null)
   const [formData, setFormData] = useState({
     reason: "",
@@ -34,72 +36,99 @@ export function AdmissionReviewModal({ admissionId, studentName, onSuccess }: Ad
     payment_confirmation: null as File | null,
     approval_document: null as File | null,
   })
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
 
-  // Mock data - replace with actual API call
-  const admissionData = {
-    id: admissionId,
-    student: {
-      name: studentName,
-      email: "student@email.com",
-      phone: "9876543210",
-      dob: "2000-05-15",
-      gender: "Male",
-      address: "123, MG Road, Delhi - 110001",
-    },
-    course: {
-      name: "B.Tech Computer Science",
-      university: "Delhi University",
-      duration: "4 Years",
-      mode: "Regular",
-    },
-    documents: [
-      { name: "10th Marksheet", status: "verified", url: "#" },
-      { name: "12th Marksheet", status: "verified", url: "#" },
-      { name: "ID Proof (Aadhar)", status: "verified", url: "#" },
-      { name: "Passport Photo", status: "pending", url: "#" },
-      { name: "Migration Certificate", status: "verified", url: "#" },
-    ],
-    financial: {
-      university_fee: 400000,
-      display_fee: 500000,
-      actual_fee: 480000,
-      consultancy_profit: 80000,
-      agent_commission: 30000,
-      net_profit: 50000,
-      admission_by: "agent",
-      agent_name: "Rajesh Kumar",
-      consultancy_name: "Global Education Consultants",
-    },
-    status: "submitted_to_university",
-    submitted_date: "2024-01-15",
+  const supabase = createClient()
+
+  useEffect(() => {
+    loadAdmissionDetails()
+  }, [admissionId])
+
+  const loadAdmissionDetails = async () => {
+    try {
+      setLoading(true)
+      const { data, error } = await supabase
+        .from('admissions')
+        .select(`
+          *,
+          universities ( name, contact_email, contact_phone ),
+          consultancies ( name, contact_email, contact_phone ),
+          agents ( first_name, last_name, commission_rate ),
+          university_courses (
+            university_fee,
+            display_fee,
+            commission_type,
+            commission_value,
+            master_courses ( name, duration )
+          )
+        `)
+        .eq('id', admissionId)
+        .single()
+
+      if (error) throw error
+      setAdmissionData(data)
+    } catch (error: any) {
+      console.error("Error loading admission details:", error)
+      alert("Failed to load details: " + error.message)
+    } finally {
+      setLoading(false)
+    }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!action) return
 
-    setLoading(true)
+    setSubmitting(true)
 
     try {
-      const response = await fetch(`/api/admissions/${admissionId}/review`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action,
-          ...formData,
-        }),
-      })
-
-      if (response.ok) {
-        onSuccess?.()
+      const statusMap = {
+        approve: 'approved',
+        reject: 'rejected',
+        revert: 'reverted'
       }
-    } catch (error) {
+
+      const { error } = await supabase
+        .from('admissions')
+        .update({
+          status: statusMap[action],
+          rejection_reason: action === 'reject' ? formData.reason : null,
+          metadata: {
+            ...admissionData.metadata,
+            review_message: formData.message,
+            reviewed_at: new Date().toISOString()
+          }
+        })
+        .eq('id', admissionId)
+
+      if (error) throw error
+
+      onSuccess?.()
+    } catch (error: any) {
       console.error("Failed to review admission:", error)
+      alert("Error: " + error.message)
     } finally {
-      setLoading(false)
+      setSubmitting(false)
     }
   }
+
+  if (loading) return <div className="p-8 text-center text-muted-foreground">Loading details...</div>
+  if (!admissionData) return <div className="p-8 text-center text-red-500">Admission not found</div>
+
+  const financial = {
+    university_fee: admissionData.university_courses?.university_fee || 0,
+    display_fee: admissionData.university_courses?.display_fee || 0,
+    actual_fee: admissionData.total_fee || 0,
+    consultancy_profit: (admissionData.university_courses?.commission_type === 'percent'
+      ? (admissionData.total_fee * (admissionData.university_courses?.commission_value / 100))
+      : admissionData.university_courses?.commission_value) || 0,
+    agent_commission: (admissionData.agents?.commission_rate
+      ? (admissionData.total_fee * (admissionData.agents.commission_rate / 100))
+      : 0),
+    net_profit: 0 // Will calculate properly if needed
+  }
+  financial.net_profit = financial.actual_fee - financial.university_fee - financial.agent_commission
 
   return (
     <div className="space-y-6 max-h-[75vh] overflow-y-auto px-1">
@@ -109,8 +138,8 @@ export function AdmissionReviewModal({ admissionId, studentName, onSuccess }: Ad
           <h3 className="text-xl font-bold">Admission Review</h3>
           <p className="text-sm text-muted-foreground">{studentName}</p>
         </div>
-        <Badge variant={admissionData.status === "submitted_to_university" ? "default" : "secondary"}>
-          {admissionData.status.replace(/_/g, " ").toUpperCase()}
+        <Badge variant={admissionData.status === "approved" ? "default" : "secondary"}>
+          {admissionData.status.toUpperCase()}
         </Badge>
       </div>
 
@@ -132,27 +161,27 @@ export function AdmissionReviewModal({ admissionId, studentName, onSuccess }: Ad
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div>
                 <p className="text-muted-foreground">Full Name</p>
-                <p className="font-medium">{admissionData.student.name}</p>
+                <p className="font-medium">{admissionData.student_name}</p>
               </div>
               <div>
                 <p className="text-muted-foreground">Email</p>
-                <p className="font-medium">{admissionData.student.email}</p>
+                <p className="font-medium">{admissionData.student_email}</p>
               </div>
               <div>
                 <p className="text-muted-foreground">Phone</p>
-                <p className="font-medium">{admissionData.student.phone}</p>
+                <p className="font-medium">{admissionData.student_phone}</p>
               </div>
               <div>
                 <p className="text-muted-foreground">Date of Birth</p>
-                <p className="font-medium">{admissionData.student.dob}</p>
+                <p className="font-medium">{admissionData.metadata?.dob || 'N/A'}</p>
               </div>
               <div>
                 <p className="text-muted-foreground">Gender</p>
-                <p className="font-medium">{admissionData.student.gender}</p>
+                <p className="font-medium">{admissionData.metadata?.gender || 'N/A'}</p>
               </div>
               <div className="col-span-2">
                 <p className="text-muted-foreground">Address</p>
-                <p className="font-medium">{admissionData.student.address}</p>
+                <p className="font-medium">{admissionData.metadata?.address || 'N/A'}</p>
               </div>
             </div>
           </Card>
@@ -168,19 +197,19 @@ export function AdmissionReviewModal({ admissionId, studentName, onSuccess }: Ad
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div>
                 <p className="text-muted-foreground">Course Name</p>
-                <p className="font-medium">{admissionData.course.name}</p>
+                <p className="font-medium">{admissionData.university_courses?.master_courses?.name}</p>
               </div>
               <div>
                 <p className="text-muted-foreground">University</p>
-                <p className="font-medium">{admissionData.course.university}</p>
+                <p className="font-medium">{admissionData.universities?.name}</p>
               </div>
               <div>
                 <p className="text-muted-foreground">Duration</p>
-                <p className="font-medium">{admissionData.course.duration}</p>
+                <p className="font-medium">{admissionData.university_courses?.master_courses?.duration}</p>
               </div>
               <div>
                 <p className="text-muted-foreground">Mode</p>
-                <p className="font-medium">{admissionData.course.mode}</p>
+                <p className="font-medium">{admissionData.university_courses?.mode_of_study || 'N/A'}</p>
               </div>
             </div>
           </Card>
@@ -194,7 +223,7 @@ export function AdmissionReviewModal({ admissionId, studentName, onSuccess }: Ad
               <h4 className="font-semibold">Submitted Documents</h4>
             </div>
             <div className="space-y-2">
-              {admissionData.documents.map((doc, index) => (
+              {(admissionData.metadata?.documents || []).map((doc: any, index: number) => (
                 <div key={index} className="flex items-center justify-between p-3 border rounded">
                   <div className="flex items-center gap-3">
                     <FileText className="w-4 h-4 text-muted-foreground" />
@@ -210,6 +239,9 @@ export function AdmissionReviewModal({ admissionId, studentName, onSuccess }: Ad
                   </div>
                 </div>
               ))}
+              {(admissionData.metadata?.documents || []).length === 0 && (
+                <p className="text-center py-4 text-sm text-muted-foreground">No documents uploaded</p>
+              )}
             </div>
           </Card>
         </TabsContent>
@@ -224,36 +256,36 @@ export function AdmissionReviewModal({ admissionId, studentName, onSuccess }: Ad
             <div className="space-y-3">
               <div className="flex justify-between p-2 bg-muted/50 rounded">
                 <span className="text-sm">University Fee</span>
-                <span className="font-semibold">₹{admissionData.financial.university_fee.toLocaleString()}</span>
+                <span className="font-semibold">₹{financial.university_fee.toLocaleString()}</span>
               </div>
               <div className="flex justify-between p-2">
                 <span className="text-sm">Student Display Fee</span>
-                <span className="font-semibold">₹{admissionData.financial.display_fee.toLocaleString()}</span>
+                <span className="font-semibold">₹{financial.display_fee.toLocaleString()}</span>
               </div>
               <div className="flex justify-between p-2 bg-muted/50 rounded">
                 <span className="text-sm">Actual Fee Collected</span>
-                <span className="font-semibold">₹{admissionData.financial.actual_fee.toLocaleString()}</span>
+                <span className="font-semibold">₹{financial.actual_fee.toLocaleString()}</span>
               </div>
               <Separator />
               <div className="flex justify-between p-2">
                 <span className="text-sm">Consultancy Profit</span>
-                <span className="font-semibold text-green-600">₹{admissionData.financial.consultancy_profit.toLocaleString()}</span>
+                <span className="font-semibold text-green-600">₹{financial.consultancy_profit.toLocaleString()}</span>
               </div>
               <div className="flex justify-between p-2 bg-muted/50 rounded">
                 <span className="text-sm">Agent Commission</span>
-                <span className="font-semibold text-blue-600">₹{admissionData.financial.agent_commission.toLocaleString()}</span>
+                <span className="font-semibold text-blue-600">₹{financial.agent_commission.toLocaleString()}</span>
               </div>
               <div className="flex justify-between p-2">
                 <span className="text-sm">Net Profit</span>
-                <span className="font-semibold text-purple-600">₹{admissionData.financial.net_profit.toLocaleString()}</span>
+                <span className="font-semibold text-purple-600">₹{financial.net_profit.toLocaleString()}</span>
               </div>
               <Separator />
               <div className="text-sm space-y-1">
-                <p><strong>Admission By:</strong> {admissionData.financial.admission_by === "agent" ? "Agent" : "Consultancy"}</p>
-                {admissionData.financial.admission_by === "agent" && (
-                  <p><strong>Agent Name:</strong> {admissionData.financial.agent_name}</p>
+                <p><strong>Admission By:</strong> {admissionData.agent_id ? "Agent" : "Consultancy"}</p>
+                {admissionData.agent_id && (
+                  <p><strong>Agent Name:</strong> {admissionData.agents ? `${admissionData.agents.first_name} ${admissionData.agents.last_name}` : "N/A"}</p>
                 )}
-                <p><strong>Consultancy:</strong> {admissionData.financial.consultancy_name}</p>
+                <p><strong>Consultancy:</strong> {admissionData.consultancies?.name || "N/A"}</p>
               </div>
             </div>
           </Card>
@@ -296,7 +328,7 @@ export function AdmissionReviewModal({ admissionId, studentName, onSuccess }: Ad
         ) : (
           <Card className="p-4">
             <h4 className="font-semibold mb-3 capitalize">{action} Admission</h4>
-            
+
             {action === "revert" && (
               <div className="space-y-3">
                 <div>
@@ -366,8 +398,8 @@ export function AdmissionReviewModal({ admissionId, studentName, onSuccess }: Ad
               <Button type="button" variant="outline" className="flex-1" onClick={() => setAction(null)}>
                 Cancel
               </Button>
-              <Button type="submit" className="flex-1" disabled={loading}>
-                {loading ? "Processing..." : `Confirm ${action}`}
+              <Button type="submit" className="flex-1" disabled={submitting}>
+                {submitting ? "Processing..." : `Confirm ${action}`}
               </Button>
             </div>
           </Card>

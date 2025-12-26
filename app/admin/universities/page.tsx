@@ -7,6 +7,8 @@ import { Plus, Edit2, Trash2, Settings } from "lucide-react"
 import { UniversityForm } from "@/components/admin/university-form"
 import { UniversityPermissionsModal } from "@/components/admin/university-permissions-modal"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { createClient } from "@/lib/supabase"
+
 
 interface University {
   id: string
@@ -34,33 +36,28 @@ export default function UniversitiesPage() {
     const storedToken = localStorage.getItem('token')
     if (storedToken) {
       setToken(storedToken)
-      loadUniversities(storedToken)
+      loadUniversities()
     } else {
       setLoading(false)
       setError('No authentication token found')
     }
   }, [])
 
-  const loadUniversities = async (authToken: string) => {
+
+  const loadUniversities = async () => {
     try {
       setLoading(true)
-      const backendUrl = 'https://perl-backend-env.up.railway.app'
-      const response = await fetch(`${backendUrl}/api/universities`, {
-        headers: {
-          'Authorization': `Bearer ${authToken}`,
-        },
-      })
-      if (response.ok) {
-        const data = await response.json()
-        // Assuming backend returns data directly or wrapped in success response
-        const universitiesData = data.success ? data.data : data
-        setUniversities(universitiesData)
-        setError(null)
-      } else {
-        const errorText = await response.text()
-        console.log("API error response:", errorText)
-        setError('Failed to load universities')
-      }
+      const supabase = createClient()
+
+      const { data, error } = await supabase
+        .from('universities')
+        .select('*')
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+
+      setUniversities(data || [])
+      setError(null)
     } catch (error) {
       console.error('Error loading universities:', error)
       setError('Failed to load universities')
@@ -115,7 +112,7 @@ export default function UniversitiesPage() {
             </DialogHeader>
             <UniversityForm onSuccess={() => {
               setAddDialogOpen(false)
-              loadUniversities(token) // Reload universities
+              loadUniversities() // Reload universities
               alert('University created successfully!')
             }} />
           </DialogContent>
@@ -134,57 +131,57 @@ export default function UniversitiesPage() {
             </div>
           ) : (
             universities.map((uni) => (
-            <Card key={uni.id} className="p-6 hover:shadow-lg transition-shadow">
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-4">
-                    <div>
-                      <h3 className="text-lg font-semibold">{uni.name}</h3>
-                      <p className="text-sm text-muted-foreground">Reg: {uni.registration_number}</p>
+              <Card key={uni.id} className="p-6 hover:shadow-lg transition-shadow">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-4">
+                      <div>
+                        <h3 className="text-lg font-semibold">{uni.name}</h3>
+                        <p className="text-sm text-muted-foreground">Reg: {uni.registration_number}</p>
+                      </div>
+                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(uni.status)}`}>
+                        {uni.status}
+                      </span>
                     </div>
-                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(uni.status)}`}>
-                      {uni.status}
-                    </span>
+                    <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
+                      <div>
+                        <p className="text-muted-foreground">Email</p>
+                        <p className="font-medium">{uni.contact_email}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Students</p>
+                        <p className="font-medium">{uni.total_students}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Wallet</p>
+                        <p className="font-medium">₹{(uni.wallet_balance / 1000).toFixed(0)}K</p>
+                      </div>
+                    </div>
                   </div>
-                  <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
-                    <div>
-                      <p className="text-muted-foreground">Email</p>
-                      <p className="font-medium">{uni.contact_email}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">Students</p>
-                      <p className="font-medium">{uni.total_students}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">Wallet</p>
-                      <p className="font-medium">₹{(uni.wallet_balance / 1000).toFixed(0)}K</p>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="icon" title="Permissions" onClick={() => handlePermissions(uni)}>
-                    <Settings className="w-4 h-4" />
-                  </Button>
-                  <Button variant="ghost" size="icon" title="Edit" onClick={() => handleEdit(uni)}>
-                    <Edit2 className="w-4 h-4" />
-                  </Button>
-                  {deleteConfirmId === uni.id ? (
-                    <div className="flex gap-1">
-                      <Button variant="destructive" size="sm" onClick={() => handleDelete(uni.id)}>
-                        Confirm
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => setDeleteConfirmId(null)}>
-                        Cancel
-                      </Button>
-                    </div>
-                  ) : (
-                    <Button variant="ghost" size="icon" className="text-red-600" title="Delete" onClick={() => setDeleteConfirmId(uni.id)}>
-                      <Trash2 className="w-4 h-4" />
+                  <div className="flex items-center gap-2">
+                    <Button variant="ghost" size="icon" title="Permissions" onClick={() => handlePermissions(uni)}>
+                      <Settings className="w-4 h-4" />
                     </Button>
-                  )}
+                    <Button variant="ghost" size="icon" title="Edit" onClick={() => handleEdit(uni)}>
+                      <Edit2 className="w-4 h-4" />
+                    </Button>
+                    {deleteConfirmId === uni.id ? (
+                      <div className="flex gap-1">
+                        <Button variant="destructive" size="sm" onClick={() => handleDelete(uni.id)}>
+                          Confirm
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => setDeleteConfirmId(null)}>
+                          Cancel
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button variant="ghost" size="icon" className="text-red-600" title="Delete" onClick={() => setDeleteConfirmId(uni.id)}>
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </Card>
+              </Card>
             ))
           )}
         </div>
@@ -199,13 +196,13 @@ export default function UniversitiesPage() {
           <DialogHeader>
             <DialogTitle>Edit University</DialogTitle>
           </DialogHeader>
-          <UniversityForm 
+          <UniversityForm
             onSuccess={() => {
               setEditDialogOpen(false)
               setSelectedUni(null)
-              loadUniversities(token) // Reload universities
+              loadUniversities() // Reload universities
               alert('University updated successfully!')
-            }} 
+            }}
           />
         </DialogContent>
       </Dialog>
@@ -219,15 +216,15 @@ export default function UniversitiesPage() {
           <DialogHeader>
             <DialogTitle>University Permissions - {selectedUni?.name}</DialogTitle>
           </DialogHeader>
-          <UniversityPermissionsModal 
+          <UniversityPermissionsModal
             universityId={selectedUni?.id}
             universityName={selectedUni?.name || ""}
             onSuccess={() => {
               setPermissionsDialogOpen(false)
               setSelectedUni(null)
-              loadUniversities(token) // Reload universities
+              loadUniversities() // Reload universities
               alert('Permissions updated successfully!')
-            }} 
+            }}
           />
         </DialogContent>
       </Dialog>

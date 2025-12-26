@@ -1,6 +1,5 @@
 "use client"
 
-import type React from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -9,301 +8,276 @@ import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useState } from "react"
-import { Save, RotateCcw } from "lucide-react"
+import { Save, RotateCcw, Settings, Globe, Percent, Bell, ShieldAlert, Cpu, Database, DatabaseZap } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { createClient } from "@/lib/supabase"
+import { Loader2 } from "lucide-react"
 
 export default function SettingsPage() {
   const [generalSettings, setGeneralSettings] = useState({
-    app_name: "Profit Pulse EduConnect",
-    support_email: "support@profitpulse.com",
-    support_phone: "+91-9876543210",
-    company_address: "123 Education Street, New Delhi, India",
+    app_name: "Perl Admin Portal",
+    support_email: "support@perl-edu.com",
+    support_phone: "+91 98877 66554",
+    company_address: "Sector 62, Noida, UP, India",
     gst_rate: "18",
-    timezone: "Asia/Kolkata",
+    currency: "INR (₹)",
   })
 
   const [commissionSettings, setCommissionSettings] = useState({
-    default_agent_commission: "5",
-    default_consultancy_share: "10",
-    university_processing_fee: "2",
-    super_admin_profit_margin: "8",
+    default_agent_commission: "10",
+    default_consultancy_share: "20",
+    system_markup: "5",
   })
 
-  const [systemSettings, setSystemSettings] = useState({
-    enable_email_notifications: true,
-    enable_sms_alerts: true,
-    auto_payment_reminder: true,
-    maintenance_mode: false,
-    backup_enabled: true,
-    auto_backup_daily: true,
-  })
-
+  const [loading, setLoading] = useState(true)
   const [savedMessage, setSavedMessage] = useState("")
 
-  const handleGeneralChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const { name, value } = e.target
-    setGeneralSettings((prev) => ({ ...prev, [name]: value }))
+  const supabase = createClient()
+
+  useEffect(() => {
+    loadSettings()
+  }, [])
+
+  const loadSettings = async () => {
+    try {
+      setLoading(true)
+      const { data, error } = await supabase.from('app_settings').select('*')
+      if (error) throw error
+
+      if (data) {
+        const general = data.find(s => s.id === 'general')?.data
+        const commission = data.find(s => s.id === 'commission')?.data
+        if (general) setGeneralSettings(general)
+        if (commission) setCommissionSettings(commission)
+      }
+    } catch (err: any) {
+      console.error("Error loading settings:", err)
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const handleCommissionChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target
-    setCommissionSettings((prev) => ({ ...prev, [name]: value }))
+  const handleSave = async (section: string) => {
+    try {
+      const settingsId = section.toLowerCase() === 'general' ? 'general' : 'commission'
+      const settingsData = section.toLowerCase() === 'general' ? generalSettings : commissionSettings
+
+      const { error } = await supabase
+        .from('app_settings')
+        .upsert({ id: settingsId, data: settingsData })
+
+      if (error) throw error
+
+      setSavedMessage(`${section} Preferences updated!`)
+      setTimeout(() => setSavedMessage(""), 3000)
+    } catch (err: any) {
+      alert("Failed to save: " + err.message)
+    }
   }
 
-  const handleSystemChange = (name: string, value: boolean) => {
-    setSystemSettings((prev) => ({ ...prev, [name]: value }))
-  }
-
-  const handleSave = (section: string) => {
-    setSavedMessage(`${section} settings saved successfully!`)
-    setTimeout(() => setSavedMessage(""), 3000)
-  }
+  if (loading) return (
+    <div className="p-20 flex flex-col items-center justify-center opacity-50">
+      <Loader2 className="w-12 h-12 animate-spin text-primary mb-4" />
+      <p className="font-bold text-lg animate-pulse">Loading configurations...</p>
+    </div>
+  )
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="p-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">System Settings</h1>
-        {savedMessage && <p className="text-green-600 font-medium">{savedMessage}</p>}
+        <div>
+          <h1 className="text-3xl font-bold font-heading flex items-center gap-3">
+            <Settings className="w-8 h-8 text-primary" />
+            System Configuration
+          </h1>
+          <p className="text-muted-foreground mt-1">Global environment variables and business logic parameters</p>
+        </div>
+        {savedMessage && (
+          <Badge className="bg-green-500 text-white animate-bounce px-4 py-1.5 rounded-full border-none">
+            {savedMessage}
+          </Badge>
+        )}
       </div>
 
       <Tabs defaultValue="general" className="w-full">
-        <TabsList className="grid w-full max-w-2xl grid-cols-4">
-          <TabsTrigger value="general">General</TabsTrigger>
-          <TabsTrigger value="commission">Commission</TabsTrigger>
-          <TabsTrigger value="system">System</TabsTrigger>
-          <TabsTrigger value="integrations">Integrations</TabsTrigger>
+        <TabsList className="flex w-fit bg-muted p-1 rounded-xl h-12 mb-8">
+          <TabsTrigger value="general" className="rounded-lg px-8 font-bold data-[state=active]:bg-white data-[state=active]:shadow-sm">
+            <Globe className="w-4 h-4 mr-2" /> General
+          </TabsTrigger>
+          <TabsTrigger value="commission" className="rounded-lg px-8 font-bold data-[state=active]:bg-white data-[state=active]:shadow-sm">
+            <Percent className="w-4 h-4 mr-2" /> Billing
+          </TabsTrigger>
+          <TabsTrigger value="system" className="rounded-lg px-8 font-bold data-[state=active]:bg-white data-[state=active]:shadow-sm">
+            <Cpu className="w-4 h-4 mr-2" /> Engine
+          </TabsTrigger>
+          <TabsTrigger value="infra" className="rounded-lg px-8 font-bold data-[state=active]:bg-white data-[state=active]:shadow-sm">
+            <DatabaseZap className="w-4 h-4 mr-2" /> Infrastructure
+          </TabsTrigger>
         </TabsList>
 
-        {/* General Settings */}
-        <TabsContent value="general" className="space-y-4">
-          <Card className="p-6">
-            <h3 className="text-lg font-semibold mb-6">General Settings</h3>
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="app_name">Application Name</Label>
-                <Input id="app_name" name="app_name" value={generalSettings.app_name} onChange={handleGeneralChange} />
-              </div>
-
-              <div>
-                <Label htmlFor="support_email">Support Email</Label>
-                <Input
-                  id="support_email"
-                  name="support_email"
-                  type="email"
-                  value={generalSettings.support_email}
-                  onChange={handleGeneralChange}
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="support_phone">Support Phone</Label>
-                <Input
-                  id="support_phone"
-                  name="support_phone"
-                  value={generalSettings.support_phone}
-                  onChange={handleGeneralChange}
-                />
-              </div>
-
-              <div>
-                <Label htmlFor="company_address">Company Address</Label>
-                <Textarea
-                  id="company_address"
-                  name="company_address"
-                  value={generalSettings.company_address}
-                  onChange={handleGeneralChange}
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <Label htmlFor="gst_rate">GST Rate (%)</Label>
+        <TabsContent value="general" className="animate-in fade-in-50 zoom-in-95 duration-300">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <Card className="lg:col-span-2 p-8 border-none shadow-md space-y-6">
+              <div className="grid grid-cols-2 gap-6">
+                <div className="space-y-2">
+                  <Label className="font-bold">Identity Name</Label>
                   <Input
-                    id="gst_rate"
-                    name="gst_rate"
+                    value={generalSettings.app_name}
+                    className="h-11 bg-muted/20 border-muted"
+                    onChange={(e) => setGeneralSettings({ ...generalSettings, app_name: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="font-bold">System Currency</Label>
+                  <Input
+                    value={generalSettings.currency}
+                    className="h-11 bg-muted/20 border-muted"
+                    onChange={(e) => setGeneralSettings({ ...generalSettings, currency: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="font-bold">Compliance Email</Label>
+                  <Input
+                    value={generalSettings.support_email}
+                    className="h-11 bg-muted/20 border-muted"
+                    onChange={(e) => setGeneralSettings({ ...generalSettings, support_email: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="font-bold">Tax Percentage (GST)</Label>
+                  <Input
                     type="number"
                     value={generalSettings.gst_rate}
-                    onChange={handleGeneralChange}
+                    className="h-11 bg-muted/20 border-muted"
+                    onChange={(e) => setGeneralSettings({ ...generalSettings, gst_rate: e.target.value })}
                   />
                 </div>
-
-                <div>
-                  <Label htmlFor="timezone">Timezone</Label>
-                  <select
-                    id="timezone"
-                    name="timezone"
-                    value={generalSettings.timezone}
-                    onChange={handleGeneralChange}
-                    className="w-full px-3 py-2 border border-input rounded-md bg-background"
-                  >
-                    <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
-                    <option value="UTC">UTC</option>
-                    <option value="Asia/Dubai">Asia/Dubai (GST)</option>
-                  </select>
+                <div className="col-span-2 space-y-2">
+                  <Label className="font-bold">Headquarters Address</Label>
+                  <Textarea
+                    value={generalSettings.company_address}
+                    className="bg-muted/20 border-muted"
+                    rows={3}
+                    onChange={(e) => setGeneralSettings({ ...generalSettings, company_address: e.target.value })}
+                  />
                 </div>
               </div>
-
-              <div className="flex gap-2 pt-4">
-                <Button onClick={() => handleSave("General")}>
-                  <Save className="w-4 h-4 mr-2" />
-                  Save Settings
-                </Button>
-                <Button variant="outline" className="bg-transparent">
-                  <RotateCcw className="w-4 h-4 mr-2" />
-                  Reset
-                </Button>
+              <div className="flex justify-end gap-3 pt-4">
+                <Button variant="ghost" className="font-bold">Discard</Button>
+                <Button className="font-black px-10 shadow-lg shadow-primary/20" onClick={() => handleSave('General')}>Save Changes</Button>
               </div>
+            </Card>
+
+            <div className="space-y-6">
+              <Card className="p-6 border-none shadow-md bg-slate-900 text-white">
+                <Globe className="w-10 h-10 text-primary mb-4" />
+                <h4 className="font-bold text-lg mb-2">Localization</h4>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  System is currently configured for India operations. All financial logs are generated in IST (UTC+5:30).
+                </p>
+              </Card>
+              <Card className="p-6 border-none shadow-md bg-white">
+                <ShieldAlert className="w-10 h-10 text-amber-500 mb-4" />
+                <h4 className="font-bold text-lg mb-2">Account Privacy</h4>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Changes to Headquarters address may require re-verification of business documents.
+                </p>
+              </Card>
             </div>
-          </Card>
+          </div>
         </TabsContent>
 
-        {/* Commission Settings */}
-        <TabsContent value="commission" className="space-y-4">
-          <Card className="p-6">
-            <h3 className="text-lg font-semibold mb-6">Commission & Fee Configuration</h3>
-            <div className="space-y-4">
-              <div className="p-4 bg-blue-50 border border-blue-200 rounded mb-6">
-                <p className="text-sm text-blue-900">
-                  Configure default commission percentages and fee structures for the system. These values can be
-                  overridden at the course level.
-                </p>
-              </div>
+        <TabsContent value="commission" className="animate-in fade-in-50 zoom-in-95 duration-300">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <Card className="p-8 border-none shadow-md space-y-8">
+              <h3 className="text-xl font-bold font-heading flex items-center gap-2">
+                <Percent className="w-6 h-6 text-primary" />
+                Default Settlement Rules
+              </h3>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="agent_commission">Agent Commission (%)</Label>
+              <div className="space-y-6">
+                <div className="p-4 bg-muted/30 rounded-2xl flex items-center justify-between">
+                  <div className="space-y-1">
+                    <Label className="font-black text-sm">Base Agent Commission (%)</Label>
+                    <p className="text-xs text-muted-foreground italic">Applied when course-level rate is null</p>
+                  </div>
                   <Input
-                    id="agent_commission"
-                    name="default_agent_commission"
-                    type="number"
-                    step="0.1"
+                    className="w-24 text-center font-black h-11 border-primary/20"
                     value={commissionSettings.default_agent_commission}
-                    onChange={handleCommissionChange}
+                    onChange={(e) => setCommissionSettings({ ...commissionSettings, default_agent_commission: e.target.value })}
                   />
                 </div>
 
-                <div>
-                  <Label htmlFor="consultancy_share">Consultancy Share (%)</Label>
+                <div className="p-4 bg-muted/30 rounded-2xl flex items-center justify-between">
+                  <div className="space-y-1">
+                    <Label className="font-black text-sm">Consultancy Protocol Share (%)</Label>
+                    <p className="text-xs text-muted-foreground italic">Partner consultancy retention rate</p>
+                  </div>
                   <Input
-                    id="consultancy_share"
-                    name="default_consultancy_share"
-                    type="number"
-                    step="0.1"
+                    className="w-24 text-center font-black h-11 border-primary/20"
                     value={commissionSettings.default_consultancy_share}
-                    onChange={handleCommissionChange}
+                    onChange={(e) => setCommissionSettings({ ...commissionSettings, default_consultancy_share: e.target.value })}
                   />
                 </div>
 
-                <div>
-                  <Label htmlFor="university_fee">University Processing Fee (%)</Label>
+                <div className="p-4 bg-primary/5 border border-primary/10 rounded-2xl flex items-center justify-between">
+                  <div className="space-y-1">
+                    <Label className="font-black text-sm text-primary">System Infrastructure Fee (%)</Label>
+                    <p className="text-xs text-primary/60 italic">Platform usage and maintenance markup</p>
+                  </div>
                   <Input
-                    id="university_fee"
-                    name="university_processing_fee"
-                    type="number"
-                    step="0.1"
-                    value={commissionSettings.university_processing_fee}
-                    onChange={handleCommissionChange}
-                  />
-                </div>
-
-                <div>
-                  <Label htmlFor="profit_margin">Super Admin Profit Margin (%)</Label>
-                  <Input
-                    id="profit_margin"
-                    name="super_admin_profit_margin"
-                    type="number"
-                    step="0.1"
-                    value={commissionSettings.super_admin_profit_margin}
-                    onChange={handleCommissionChange}
+                    className="w-24 text-center font-black h-11 bg-white border-primary/20"
+                    value={commissionSettings.system_markup}
+                    onChange={(e) => setCommissionSettings({ ...commissionSettings, system_markup: e.target.value })}
                   />
                 </div>
               </div>
 
-              <div className="p-4 bg-green-50 border border-green-200 rounded">
-                <p className="font-semibold text-green-900 mb-2">Total Distribution</p>
-                <p className="text-sm text-green-800">
-                  {`${(Number.parseFloat(commissionSettings.default_agent_commission) + Number.parseFloat(commissionSettings.default_consultancy_share) + Number.parseFloat(commissionSettings.university_processing_fee) + Number.parseFloat(commissionSettings.super_admin_profit_margin)).toFixed(1)}%`}
-                  {" of fees are distributed"}
-                </p>
-              </div>
+              <Button className="w-full h-14 font-black text-lg bg-slate-900 shadow-xl" onClick={() => handleSave('Billing')}>Update Revenue Logic</Button>
+            </Card>
 
-              <div className="flex gap-2 pt-4">
-                <Button onClick={() => handleSave("Commission")}>
-                  <Save className="w-4 h-4 mr-2" />
-                  Save Settings
-                </Button>
+            <Card className="p-8 border-none bg-slate-50 shadow-inner">
+              <h4 className="font-bold mb-4">Payout Schedule</h4>
+              <div className="space-y-4">
+                {[
+                  { day: 'Monday', action: 'Ledger Reconciliation' },
+                  { day: 'Wednesday', action: 'University Payouts' },
+                  { day: 'Friday', action: 'Agent Settlements' },
+                ].map((item, i) => (
+                  <div key={i} className="flex gap-4 items-center">
+                    <div className="w-12 h-12 flex items-center justify-center bg-white rounded-xl shadow-sm text-xs font-black">{item.day.slice(0, 3)}</div>
+                    <p className="text-sm font-medium">{item.action}</p>
+                  </div>
+                ))}
+                <div className="mt-8 pt-8 border-t border-slate-200">
+                  <p className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2">Automated Rules</p>
+                  <ul className="text-xs space-y-2 text-slate-500 font-medium">
+                    <li className="flex items-center gap-2"><div className="w-1 h-1 bg-green-500 rounded-full" /> Auto-approve payouts under ₹50,000</li>
+                    <li className="flex items-center gap-2"><div className="w-1 h-1 bg-green-500 rounded-full" /> Flag transactions with deviation &gt; 2%</li>
+                  </ul>
+                </div>
               </div>
-            </div>
-          </Card>
+            </Card>
+          </div>
         </TabsContent>
 
-        {/* System Settings */}
-        <TabsContent value="system" className="space-y-4">
-          <Card className="p-6">
-            <h3 className="text-lg font-semibold mb-6">System Configuration</h3>
-            <div className="space-y-4">
+        <TabsContent value="system" className="animate-in fade-in-50 zoom-in-95 duration-300">
+          <Card className="p-8 border-none shadow-md">
+            <div className="space-y-6">
               {[
-                { key: "enable_email_notifications", label: "Enable Email Notifications" },
-                { key: "enable_sms_alerts", label: "Enable SMS Alerts" },
-                { key: "auto_payment_reminder", label: "Auto Payment Reminders" },
-                { key: "maintenance_mode", label: "Maintenance Mode" },
-                { key: "backup_enabled", label: "Enable Backup" },
-                { key: "auto_backup_daily", label: "Daily Auto Backup" },
-              ].map((item) => (
-                <div key={item.key} className="flex items-center justify-between p-4 border border-border rounded">
-                  <Label>{item.label}</Label>
-                  <Switch
-                    checked={systemSettings[item.key as keyof typeof systemSettings]}
-                    onCheckedChange={(value) => handleSystemChange(item.key, value)}
-                  />
+                { label: 'Cloud Notification Sync', desc: 'Sync FCM tokens with Supabase Edge Functions', active: true },
+                { label: 'Real-time Ledger Observation', desc: 'Listen to DB changes for instant wallet updates', active: true },
+                { label: 'Deep Packet Inspection', desc: 'Verify document integrity using AI check', active: false },
+                { label: 'Maintenance Protocol', desc: 'Switch portal to read-only mode for updates', active: false },
+              ].map((item, i) => (
+                <div key={i} className="flex items-center justify-between p-4 border border-muted rounded-2xl hover:bg-muted/10 transition-colors">
+                  <div className="space-y-1">
+                    <p className="font-bold text-sm">{item.label}</p>
+                    <p className="text-xs text-muted-foreground">{item.desc}</p>
+                  </div>
+                  <Switch checked={item.active} />
                 </div>
               ))}
-
-              <div className="flex gap-2 pt-4">
-                <Button onClick={() => handleSave("System")}>
-                  <Save className="w-4 h-4 mr-2" />
-                  Save Settings
-                </Button>
-              </div>
-            </div>
-          </Card>
-        </TabsContent>
-
-        {/* Integrations */}
-        <TabsContent value="integrations" className="space-y-4">
-          <Card className="p-6">
-            <h3 className="text-lg font-semibold mb-6">Third-party Integrations</h3>
-            <div className="space-y-4">
-              <div className="p-4 border border-border rounded flex items-center justify-between">
-                <div>
-                  <p className="font-semibold">Email Service (SMTP)</p>
-                  <p className="text-sm text-muted-foreground">Configure email settings for notifications</p>
-                </div>
-                <Button variant="outline">Configure</Button>
-              </div>
-
-              <div className="p-4 border border-border rounded flex items-center justify-between">
-                <div>
-                  <p className="font-semibold">SMS Gateway</p>
-                  <p className="text-sm text-muted-foreground">Setup SMS alerts and OTP service</p>
-                </div>
-                <Button variant="outline">Configure</Button>
-              </div>
-
-              <div className="p-4 border border-border rounded flex items-center justify-between">
-                <div>
-                  <p className="font-semibold">Payment Gateway</p>
-                  <p className="text-sm text-muted-foreground">Connect Razorpay or Stripe for payments</p>
-                </div>
-                <Button variant="outline">Configure</Button>
-              </div>
-
-              <div className="p-4 border border-border rounded flex items-center justify-between">
-                <div>
-                  <p className="font-semibold">Cloud Storage</p>
-                  <p className="text-sm text-muted-foreground">Setup AWS S3 or Google Cloud Storage</p>
-                </div>
-                <Button variant="outline">Configure</Button>
-              </div>
             </div>
           </Card>
         </TabsContent>

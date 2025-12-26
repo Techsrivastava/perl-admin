@@ -4,17 +4,22 @@ import { cookies } from "next/headers"
 
 export async function getSupabaseClient() {
   const cookieStore = await cookies()
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://qsstqmwaayulyfnjwoom.supabase.co'
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFzc3RxbXdhYXl1bHlmbmp3b29tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjY1NTE1OTMsImV4cCI6MjA4MjEyNzU5M30.biwt-8hEKL0JG6OmFr4GhEdsIEn9Ei8ub0882XwJgPg'
 
-  return createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
-    cookies: {
-      getAll() {
-        return cookieStore.getAll()
+  return createServerClient(
+    supabaseUrl,
+    supabaseKey,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll()
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
+        },
       },
-      setAll(cookiesToSet) {
-        cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options))
-      },
-    },
-  })
+    })
 }
 
 export async function query(sql: string, params?: any[]) {

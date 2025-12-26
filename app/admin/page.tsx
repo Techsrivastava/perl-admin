@@ -45,8 +45,7 @@ export default function DashboardPage() {
   const fetchDashboardData = async (authToken: string, showToast = false) => {
     try {
       setRefreshing(true)
-      const backendUrl = 'https://perl-backend-env.up.railway.app'
-      const response = await fetch(`${backendUrl}/api/dashboard`, {
+      const response = await fetch('/api/admin/dashboard', {
         headers: {
           'Authorization': `Bearer ${authToken}`,
         },
@@ -114,7 +113,7 @@ export default function DashboardPage() {
 
   const COLORS = ["#3b82f6", "#ef4444", "#f59e0b"]
 
-  const StatCard = ({ icon: Icon, title, value, color }: any) => (
+  const StatCard = ({ icon: Icon, title, value, color }: { icon: any, title: string, value: string | number, color: string }) => (
     <Card className="p-6 bg-card hover:shadow-lg transition-shadow">
       <div className="flex items-start justify-between">
         <div>

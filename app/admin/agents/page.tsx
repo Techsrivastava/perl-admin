@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useSession } from "next-auth/react"
+import { createClient } from "@/lib/supabase"
+
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Plus, Edit2, Trash2, Eye, Loader2 } from "lucide-react"
@@ -21,40 +22,39 @@ interface Agent {
   status: string
 }
 
+
 export default function AgentsPage() {
-  const { data: session } = useSession()
+  // const { data: session } = useSession() // REMOVED
   const [agents, setAgents] = useState<Agent[]>([])
   const [isOpen, setIsOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const { toast } = useToast()
 
   useEffect(() => {
-    if (session?.accessToken) {
-      fetchAgents()
-    }
-  }, [session])
+    fetchAgents()
+  }, [])
 
   const fetchAgents = async () => {
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://perl-backend-env.up.railway.app/api/'
-      const response = await fetch(`${backendUrl}/api/agents`, {
-        headers: {
-          'Authorization': `Bearer ${session?.accessToken}`,
-        },
-      })
-      if (response.ok) {
-        const data = await response.json()
-        // Assuming backend returns data directly or wrapped in success response
-        const agentsData = data.success ? data.data : data
-        setAgents(agentsData)
-      } else {
-        toast({
-          title: "Error",
-          description: "Failed to fetch agents",
-          variant: "destructive",
-        })
-      }
+      const supabase = createClient()
+
+      const { data, error } = await supabase
+        .from('agents')
+        .select('*, consultancies(name)')
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+
+      // Map joined data to flat structure expected by UI
+      const formattedAgents = (data || []).map((agent: any) => ({
+        ...agent,
+        consultancy: agent.consultancies?.name || 'Unknown',
+        total_commission_earned: agent.commission_balance || 0, // Fallback mapping if differing
+      }))
+
+      setAgents(formattedAgents)
     } catch (error) {
+      console.error('Error fetching agents:', error)
       toast({
         title: "Error",
         description: "Failed to fetch agents",
@@ -73,28 +73,21 @@ export default function AgentsPage() {
     if (!confirm("Are you sure you want to delete this agent?")) return
 
     try {
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://perl-backend-env.up.railway.app/api/'
-      const response = await fetch(`${backendUrl}/api/agents/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${session?.accessToken}`,
-        },
-      })
+      const supabase = createClient()
+      const { error } = await supabase
+        .from('agents')
+        .delete()
+        .eq('id', id)
 
-      if (response.ok) {
-        setAgents(agents.filter((a) => a.id !== id))
-        toast({
-          title: "Success",
-          description: "Agent deleted successfully",
-        })
-      } else {
-        toast({
-          title: "Error",
-          description: "Failed to delete agent",
-          variant: "destructive",
-        })
-      }
+      if (error) throw error
+
+      setAgents(agents.filter((a) => a.id !== id))
+      toast({
+        title: "Success",
+        description: "Agent deleted successfully",
+      })
     } catch (error) {
+      console.error("Delete error:", error)
       toast({
         title: "Error",
         description: "Failed to delete agent",

@@ -12,9 +12,11 @@ import { Label } from "@/components/ui/label"
 import { FeeSubmissionModal } from "@/components/admin/fee-submission-modal"
 import { FeeApprovalModal } from "@/components/admin/fee-approval-modal"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { createClient } from "@/lib/supabase"
 
-interface Payment {
-  id: number
+interface PaymentRecord {
+  id: string
   admission_id: string
   student_name: string
   amount: number
@@ -26,173 +28,279 @@ interface Payment {
 }
 
 export default function PaymentsPage() {
-  const { data: session } = useSession()
   const [activeTab, setActiveTab] = useState<"payments" | "pending">("payments")
   const [feeSubmissionDialogOpen, setFeeSubmissionDialogOpen] = useState(false)
   const [feeApprovalDialogOpen, setFeeApprovalDialogOpen] = useState(false)
-  const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null)
-  const [payments, setPayments] = useState<Payment[]>([])
+  const [selectedPayment, setSelectedPayment] = useState<any>(null)
+  const [payments, setPayments] = useState<PaymentRecord[]>([])
+  const [pendingSubmissions, setPendingSubmissions] = useState<PaymentRecord[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [newPayment, setNewPayment] = useState({
+    admission_id: "",
+    amount: "",
+    method: "Bank Transfer",
+    notes: "",
+  })
+  const [admissionsList, setAdmissionsList] = useState<any[]>([])
 
-  // Load payments data on component mount
+  const supabase = createClient()
+
   useEffect(() => {
-    if (session?.accessToken) {
-      loadPayments()
-    }
-  }, [session])
+    loadData()
+    loadAdmissionsList()
+  }, [])
 
-  const loadPayments = async () => {
+  const loadAdmissionsList = async () => {
+    const { data } = await supabase.from('admissions').select('id, student_name')
+    if (data) setAdmissionsList(data)
+  }
+
+  const loadData = async () => {
     try {
       setLoading(true)
-      const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://perl-backend-env.up.railway.app/api/'
-      const response = await fetch(`${backendUrl}/api/payments`, {
-        headers: {
-          'Authorization': `Bearer ${session?.accessToken}`,
-        },
-      })
-      if (response.ok) {
-        const data = await response.json()
-        // Assuming backend returns data directly or wrapped in success response
-        const paymentsData = data.success ? data.data : data
-        setPayments(paymentsData)
-      } else {
-        setError('Failed to load payments')
+
+      // 1. Load Confirmed Payments from Ledger (fetch without join first)
+      const { data: ledgerData, error: ledgerError } = await supabase
+        .from('ledger')
+        .select(`
+          id,
+          amount,
+          description,
+          created_at,
+          reference_id
+        `)
+        .eq('reference_type', 'admission')
+
+      if (ledgerError) throw ledgerError
+
+      // Fetch related admissions for the ledger entries
+      const admissionIds = [...new Set((ledgerData || []).map(item => item.reference_id).filter(Boolean))] as string[]
+      let admissionsMap: Record<string, any> = {}
+
+      if (admissionIds.length > 0) {
+        const { data: admData } = await supabase
+          .from('admissions')
+          .select('id, student_name, payment_mode')
+          .in('id', admissionIds)
+
+        if (admData) {
+          admissionsMap = admData.reduce((acc, curr) => {
+            acc[curr.id] = curr
+            return acc
+          }, {} as Record<string, any>)
+        }
       }
-    } catch (error) {
+
+      // 2. Load Pending Submissions (this join works as there is a FK)
+      const { data: submissionData, error: subError } = await supabase
+        .from('fee_submissions')
+        .select(`
+          id,
+          amount_received,
+          payment_mode,
+          payment_date,
+          transaction_id,
+          notes,
+          status,
+          admissions ( 
+            id,
+            student_name
+          )
+        `)
+        .eq('status', 'pending')
+
+      if (subError) throw subError
+
+      // Transform ledger to PaymentRecord
+      const confirmed: PaymentRecord[] = (ledgerData || []).map((item: any) => {
+        const admission = item.reference_id ? admissionsMap[item.reference_id] : null
+        return {
+          id: item.id,
+          admission_id: item.reference_id || 'N/A',
+          student_name: admission?.student_name || 'N/A',
+          amount: item.amount,
+          method: admission?.payment_mode || 'Manual Entry',
+          status: 'completed',
+          date: item.created_at,
+          reference: item.id.slice(0, 8),
+          notes: item.description
+        }
+      })
+
+      // Transform submissions to PaymentRecord
+      const pending: PaymentRecord[] = (submissionData || []).map((item: any) => ({
+        id: item.id,
+        admission_id: item.admissions?.id || 'N/A',
+        student_name: item.admissions?.student_name || 'N/A',
+        amount: item.amount_received,
+        method: item.payment_mode || 'N/A',
+        status: 'pending',
+        date: item.payment_date,
+        reference: item.transaction_id || item.id.slice(0, 8),
+        notes: item.notes
+      }))
+
+      setPayments(confirmed)
+      setPendingSubmissions(pending)
+    } catch (error: any) {
       console.error('Error loading payments:', error)
-      setError('Failed to load payments')
     } finally {
       setLoading(false)
     }
   }
 
-  const [newPayment, setNewPayment] = useState({
-    admission_id: "",
-    student_name: "",
-    amount: "",
-    method: "Bank Transfer",
-    notes: "",
-  })
-
-  const handleAddPayment = () => {
-    if (newPayment.admission_id && newPayment.student_name && newPayment.amount) {
-      const payment: Payment = {
-        id: Math.max(...payments.map((p) => p.id), 0) + 1,
-        admission_id: newPayment.admission_id,
-        student_name: newPayment.student_name,
-        amount: Number.parseInt(newPayment.amount),
-        method: newPayment.method,
-        status: "completed",
-        date: new Date().toISOString().split("T")[0],
-        reference: `REF-${Date.now()}`,
-        notes: newPayment.notes,
-      }
-      setPayments([...payments, payment])
-      setNewPayment({ admission_id: "", student_name: "", amount: "", method: "Bank Transfer", notes: "" })
-    }
-  }
-
-  const handleDeletePayment = (id: number) => {
-    setPayments(payments.filter((p) => p.id !== id))
-  }
-
-  const totalCollected = payments.reduce((sum, p) => sum + (p.status === "completed" ? p.amount : 0), 0)
-  const pendingAmount = payments.reduce((sum, p) => sum + (p.status === "pending" ? p.amount : 0), 0)
-
-  const handleApprove = (payment: Payment) => {
+  const handleApprove = (payment: any) => {
     setSelectedPayment(payment)
     setFeeApprovalDialogOpen(true)
   }
 
+  const handleDeletePayment = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this payment record?")) return
+    const { error } = await supabase.from('ledger').delete().eq('id', id)
+    if (error) alert(error.message)
+    else loadData()
+  }
+
+  const handleManualPayment = async () => {
+    if (!newPayment.admission_id || !newPayment.amount) return
+    setLoading(true)
+
+    try {
+      const amount = parseFloat(newPayment.amount)
+
+      // 1. Get current admission data
+      const { data: admission } = await supabase
+        .from('admissions')
+        .select('fee_paid, total_fee')
+        .eq('id', newPayment.admission_id)
+        .single()
+
+      if (!admission) throw new Error("Admission not found")
+
+      // 2. Update admission fee_paid
+      const { error: updateError } = await supabase
+        .from('admissions')
+        .update({
+          fee_paid: (admission.fee_paid || 0) + amount,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', newPayment.admission_id)
+
+      if (updateError) throw updateError
+
+      // 3. Create Ledger Entry
+      const { error: ledgerError } = await supabase
+        .from('ledger')
+        .insert({
+          entity_id: newPayment.admission_id,
+          entity_type: 'student',
+          transaction_type: 'credit',
+          amount: amount,
+          purpose: 'admission_fee',
+          reference_id: newPayment.admission_id,
+          reference_type: 'admission',
+          description: `Manual payment recorded: ${newPayment.notes}`
+        })
+
+      if (ledgerError) throw ledgerError
+
+      alert('Payment recorded successfully!')
+      loadData()
+      setNewPayment({ admission_id: "", amount: "", method: "Bank Transfer", notes: "" })
+    } catch (error: any) {
+      alert("Error: " + error.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const totalCollected = payments.reduce((sum, p) => sum + p.amount, 0)
+  const pendingAmount = pendingSubmissions.reduce((sum, p) => sum + p.amount, 0)
+
   return (
     <div className="p-8 space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Fee & Payments Management</h1>
+        <h1 className="text-3xl font-bold font-heading">Fee & Payments Management</h1>
         <div className="flex gap-2">
           <Dialog open={feeSubmissionDialogOpen} onOpenChange={setFeeSubmissionDialogOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" className="gap-2">
                 <Plus className="w-4 h-4" />
-                Submit Fee
+                Submit Fee Receipt
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-3xl">
-              <FeeSubmissionModal 
+              <FeeSubmissionModal
                 userType="agent"
                 onSuccess={() => {
                   setFeeSubmissionDialogOpen(false)
-                  loadPayments() // Reload payments
-                  alert('Fee submitted successfully!')
-                }} 
+                  loadData()
+                  alert('Fee submission recorded!')
+                }}
               />
             </DialogContent>
           </Dialog>
+
           <Dialog>
             <DialogTrigger asChild>
-              <Button className="gap-2">
+              <Button className="gap-2 bg-primary hover:bg-primary/90">
                 <Plus className="w-4 h-4" />
-                Add Payment
+                Record Payment
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-xl">
               <DialogHeader>
-                <DialogTitle>Record New Payment</DialogTitle>
+                <DialogTitle>Record Manual Payment</DialogTitle>
               </DialogHeader>
               <div className="space-y-4">
                 <div>
-                  <Label htmlFor="admission_id">Admission ID *</Label>
-                  <Input
-                    id="admission_id"
-                    placeholder="ADM-001"
-                    value={newPayment.admission_id}
-                    onChange={(e) => setNewPayment({ ...newPayment, admission_id: e.target.value })}
-                  />
+                  <Label>Select Admission *</Label>
+                  <Select value={newPayment.admission_id} onValueChange={(val) => setNewPayment({ ...newPayment, admission_id: val })}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select student admission" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {admissionsList.map(a => (
+                        <SelectItem key={a.id} value={a.id}>{a.student_name} ({a.id.slice(0, 8)})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label>Amount (₹) *</Label>
+                    <Input
+                      type="number"
+                      placeholder="50000"
+                      value={newPayment.amount}
+                      onChange={(e) => setNewPayment({ ...newPayment, amount: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <Label>Method</Label>
+                    <Select value={newPayment.method} onValueChange={(val) => setNewPayment({ ...newPayment, method: val })}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Bank Transfer">Bank Transfer</SelectItem>
+                        <SelectItem value="UPI">UPI</SelectItem>
+                        <SelectItem value="Cash">Cash</SelectItem>
+                        <SelectItem value="Cheque">Cheque</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
                 <div>
-                  <Label htmlFor="student_name">Student Name *</Label>
+                  <Label>Notes</Label>
                   <Input
-                    id="student_name"
-                    placeholder="Full name"
-                    value={newPayment.student_name}
-                    onChange={(e) => setNewPayment({ ...newPayment, student_name: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="amount">Amount (₹) *</Label>
-                  <Input
-                    id="amount"
-                    type="number"
-                    placeholder="500000"
-                    value={newPayment.amount}
-                    onChange={(e) => setNewPayment({ ...newPayment, amount: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="method">Payment Method</Label>
-                  <select
-                    id="method"
-                    value={newPayment.method}
-                    onChange={(e) => setNewPayment({ ...newPayment, method: e.target.value })}
-                    className="w-full px-3 py-2 border border-input rounded-md bg-background"
-                  >
-                    <option value="Bank Transfer">Bank Transfer</option>
-                    <option value="UPI">UPI</option>
-                    <option value="Cheque">Cheque</option>
-                    <option value="NEFT">NEFT</option>
-                  </select>
-                </div>
-                <div>
-                  <Label htmlFor="notes">Notes</Label>
-                  <Input
-                    id="notes"
-                    placeholder="Additional notes"
+                    placeholder="Payment reference, bank name, etc."
                     value={newPayment.notes}
                     onChange={(e) => setNewPayment({ ...newPayment, notes: e.target.value })}
                   />
                 </div>
-                <Button onClick={handleAddPayment} className="w-full">
-                  Record Payment
+                <Button onClick={handleManualPayment} className="w-full" disabled={loading}>
+                  {loading ? "Recording..." : "Confirm & Save"}
                 </Button>
               </div>
             </DialogContent>
@@ -202,124 +310,118 @@ export default function PaymentsPage() {
             <Filter className="w-4 h-4" />
             Filter
           </Button>
-          <Button className="gap-2">
-            <Download className="w-4 h-4" />
-            Export
-          </Button>
         </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card className="p-6">
-          <p className="text-sm text-muted-foreground mb-2">Total Collected</p>
-          <p className="text-3xl font-bold">₹{(totalCollected / 100000).toFixed(2)}L</p>
+      {/* Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <Card className="p-6 bg-green-50/50 border-green-100 shadow-sm">
+          <p className="text-sm font-medium text-green-600 mb-1">Total Collected</p>
+          <p className="text-4xl font-bold text-green-700">₹{totalCollected.toLocaleString()}</p>
         </Card>
-        <Card className="p-6">
-          <p className="text-sm text-muted-foreground mb-2">Pending Amount</p>
-          <p className="text-3xl font-bold text-orange-600">₹{(pendingAmount / 100000).toFixed(2)}L</p>
+        <Card className="p-6 bg-amber-50/50 border-amber-100 shadow-sm">
+          <p className="text-sm font-medium text-amber-600 mb-1">Pending Approvals</p>
+          <p className="text-4xl font-bold text-amber-700">₹{pendingAmount.toLocaleString()}</p>
         </Card>
-        <Card className="p-6">
-          <p className="text-sm text-muted-foreground mb-2">Total Transactions</p>
-          <p className="text-3xl font-bold">{payments.length}</p>
+        <Card className="p-6 bg-blue-50/50 border-blue-100 shadow-sm">
+          <p className="text-sm font-medium text-blue-600 mb-1">Total Transactions</p>
+          <p className="text-4xl font-bold text-blue-700">{payments.length + pendingSubmissions.length}</p>
         </Card>
       </div>
 
-      {/* Payments Table */}
-      <Card className="p-6">
-        {loading ? (
-          <div className="text-center py-8">Loading payments...</div>
-        ) : error ? (
-          <div className="text-center py-8 text-red-600">{error}</div>
-        ) : (
-          <div className="overflow-x-auto">
+      {/* Tabs */}
+      <Tabs value={activeTab} onValueChange={(v: any) => setActiveTab(v)} className="w-full">
+        <TabsList className="grid w-full grid-cols-2 mb-8 p-1 bg-muted/50 max-w-md">
+          <TabsTrigger value="payments" className="rounded-md">Confirmed ({payments.length})</TabsTrigger>
+          <TabsTrigger value="pending" className="rounded-md">Pending ({pendingSubmissions.length})</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="payments">
+          <Card className="border-none shadow-md overflow-hidden">
             <Table>
-              <TableHeader>
-                <TableRow className="border-b border-border">
-                  <TableHead>Payment ID</TableHead>
-                  <TableHead>Student</TableHead>
-                  <TableHead>Amount</TableHead>
-                  <TableHead>Method</TableHead>
-                  <TableHead>Reference</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Action</TableHead>
+              <TableHeader className="bg-muted/30">
+                <TableRow>
+                  <TableHead className="font-bold">Reference</TableHead>
+                  <TableHead className="font-bold">Student</TableHead>
+                  <TableHead className="font-bold">Amount</TableHead>
+                  <TableHead className="font-bold">Method</TableHead>
+                  <TableHead className="font-bold">Date</TableHead>
+                  <TableHead className="text-right font-bold">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {payments.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
-                      No payments found. Add your first payment to get started.
-                    </TableCell>
-                  </TableRow>
+                  <TableRow><TableCell colSpan={6} className="text-center py-12 text-muted-foreground">No records found</TableCell></TableRow>
                 ) : (
-                  payments.map((payment) => (
-                    <TableRow key={payment.id} className="border-b border-border hover:bg-muted/50">
-                      <TableCell className="font-mono text-sm">{payment.admission_id}</TableCell>
-                      <TableCell>{payment.student_name}</TableCell>
-                      <TableCell className="font-semibold">₹{(payment.amount / 100000).toFixed(2)}L</TableCell>
-                      <TableCell>{payment.method}</TableCell>
-                      <TableCell className="text-sm">{payment.reference}</TableCell>
-                      <TableCell>{payment.date}</TableCell>
+                  payments.map((p) => (
+                    <TableRow key={p.id} className="hover:bg-muted/10 transition-colors">
+                      <TableCell className="font-mono text-xs text-muted-foreground">{p.reference}</TableCell>
+                      <TableCell className="font-medium">{p.student_name}</TableCell>
+                      <TableCell className="font-bold text-green-600 font-mono">₹{p.amount.toLocaleString()}</TableCell>
                       <TableCell>
-                        <span
-                          className={`px-3 py-1 rounded-full text-xs font-medium ${
-                            payment.status === "completed" ? "bg-green-100 text-green-800" : "bg-yellow-100 text-yellow-800"
-                          }`}
-                        >
-                          {payment.status}
+                        <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 text-[10px] font-bold uppercase tracking-wider">
+                          {p.method}
                         </span>
                       </TableCell>
-                      <TableCell>
-                        <div className="flex gap-2">
-                          {payment.status === "pending" && (
-                            <Button 
-                              variant="ghost" 
-                              size="sm" 
-                              className="text-green-600"
-                              onClick={() => handleApprove(payment)}
-                              title="Approve payment"
-                            >
-                              <CheckCircle className="w-4 h-4" />
-                            </Button>
-                          )}
-                          <Button variant="ghost" size="sm" title="View details">
-                            <Eye className="w-4 h-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="text-red-600"
-                            onClick={() => handleDeletePayment(payment.id)}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
+                      <TableCell className="text-sm">{new Date(p.date).toLocaleDateString()}</TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="ghost" size="sm" onClick={() => handleDeletePayment(p.id)} className="text-red-500 hover:text-red-700 hover:bg-red-50">
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
                       </TableCell>
                     </TableRow>
                   ))
                 )}
               </TableBody>
             </Table>
-          </div>
-        )}
-      </Card>
+          </Card>
+        </TabsContent>
 
-      {/* Fee Approval Dialog */}
-      <Dialog open={feeApprovalDialogOpen} onOpenChange={(open) => {
-        setFeeApprovalDialogOpen(open)
-        if (!open) setSelectedPayment(null)
-      }}>
+        <TabsContent value="pending">
+          <Card className="border-none shadow-md overflow-hidden">
+            <Table>
+              <TableHeader className="bg-muted/30">
+                <TableRow>
+                  <TableHead className="font-bold">Student</TableHead>
+                  <TableHead className="font-bold">Amount</TableHead>
+                  <TableHead className="font-bold">Mode</TableHead>
+                  <TableHead className="font-bold">Submitted On</TableHead>
+                  <TableHead className="text-right font-bold">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pendingSubmissions.length === 0 ? (
+                  <TableRow><TableCell colSpan={5} className="text-center py-12 text-muted-foreground">No pending submissions</TableCell></TableRow>
+                ) : (
+                  pendingSubmissions.map((p) => (
+                    <TableRow key={p.id} className="hover:bg-muted/10 transition-colors">
+                      <TableCell className="font-medium">{p.student_name}</TableCell>
+                      <TableCell className="font-bold text-amber-600 font-mono">₹{p.amount.toLocaleString()}</TableCell>
+                      <TableCell className="capitalize text-sm">{p.method.replace('_', ' ')}</TableCell>
+                      <TableCell className="text-sm">{new Date(p.date).toLocaleDateString()}</TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="outline" size="sm" onClick={() => handleApprove(p)} className="border-amber-200 text-amber-700 hover:bg-amber-50">
+                          Review & Approve
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      <Dialog open={feeApprovalDialogOpen} onOpenChange={setFeeApprovalDialogOpen}>
         <DialogContent className="max-w-4xl">
-          <FeeApprovalModal 
-            submissionId={selectedPayment?.id.toString() || ""}
+          <FeeApprovalModal
+            submissionId={selectedPayment?.id || ""}
             onSuccess={() => {
               setFeeApprovalDialogOpen(false)
               setSelectedPayment(null)
-              loadPayments() // Reload payments
-              alert('Fee approved successfully!')
-            }} 
+              loadData()
+            }}
           />
         </DialogContent>
       </Dialog>
