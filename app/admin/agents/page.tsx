@@ -28,6 +28,7 @@ export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([])
   const [isOpen, setIsOpen] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [editingAgent, setEditingAgent] = useState<Agent | null>(null) // State for editing
   const { toast } = useToast()
 
   useEffect(() => {
@@ -66,7 +67,46 @@ export default function AgentsPage() {
   }
 
   const getStatusColor = (status: string) => {
-    return status === "active" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
+    switch (status) {
+      case "active":
+      case "approved":
+        return "bg-green-100 text-green-800"
+      case "suspended":
+        return "bg-red-100 text-red-800"
+      case "pending":
+        return "bg-yellow-100 text-yellow-800"
+      default:
+        return "bg-gray-100 text-gray-800"
+    }
+  }
+
+  const toggleStatus = async (agent: Agent) => {
+    // Valid stats: 'pending', 'approved', 'rejected', 'suspended', 'active'
+    // Logic: If currently working (active/approved) -> suspend. Else -> activate.
+    const newStatus = (agent.status === "active" || agent.status === "approved") ? "suspended" : "active"
+
+    // Optimistic update
+    setAgents(agents.map(a => a.id === agent.id ? { ...a, status: newStatus } : a))
+
+    try {
+      const supabase = createClient()
+      const { error } = await supabase.from('agents').update({ status: newStatus }).eq('id', agent.id)
+      if (error) throw error
+
+      toast({
+        title: "Status Updated",
+        description: `Agent marked as ${newStatus}`
+      })
+    } catch (error: any) {
+      console.error("Status update error:", JSON.stringify(error, null, 2))
+      // Revert on error
+      fetchAgents()
+      toast({
+        title: "Error",
+        description: "Failed to update status: " + (error?.message || "Unknown error"),
+        variant: "destructive"
+      })
+    }
   }
 
   const handleDelete = async (id: string) => {
@@ -104,25 +144,33 @@ export default function AgentsPage() {
     )
   }
 
+
+
   return (
     <div className="p-8 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Agents Management</h1>
-        <Dialog open={isOpen} onOpenChange={setIsOpen}>
+        <Dialog open={isOpen} onOpenChange={(v) => {
+          setIsOpen(v)
+          if (!v) setEditingAgent(null)
+        }}>
           <DialogTrigger asChild>
-            <Button className="gap-2">
+            <Button className="gap-2" onClick={() => setEditingAgent(null)}>
               <Plus className="w-4 h-4" />
               Add Agent
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-xl">
             <DialogHeader>
-              <DialogTitle>Add New Agent</DialogTitle>
+              <DialogTitle>{editingAgent ? "Edit Agent" : "Add New Agent"}</DialogTitle>
             </DialogHeader>
-            <AgentForm onSuccess={() => {
-              setIsOpen(false)
-              fetchAgents()
-            }} />
+            <AgentForm
+              editData={editingAgent}
+              onSuccess={() => {
+                setIsOpen(false)
+                setEditingAgent(null)
+                fetchAgents()
+              }} />
           </DialogContent>
         </Dialog>
       </div>
@@ -131,7 +179,7 @@ export default function AgentsPage() {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card className="p-6">
           <p className="text-sm text-muted-foreground mb-2">Total Active Agents</p>
-          <p className="text-3xl font-bold">{agents.filter((a) => a.status === "active").length}</p>
+          <p className="text-3xl font-bold">{agents.filter((a) => a.status === "active" || a.status === "approved").length}</p>
         </Card>
         <Card className="p-6">
           <p className="text-sm text-muted-foreground mb-2">Total Commissions Earned</p>
@@ -179,16 +227,26 @@ export default function AgentsPage() {
                   </TableCell>
                   <TableCell className="font-semibold">₹{(agent.wallet_balance / 1000).toFixed(0)}K</TableCell>
                   <TableCell>
-                    <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(agent.status)}`}>
+                    <button
+                      onClick={() => toggleStatus(agent)}
+                      className={`px-3 py-1 rounded-full text-xs font-medium cursor-pointer hover:opacity-80 transition-opacity ${getStatusColor(agent.status)}`}
+                      title="Click to toggle status"
+                    >
                       {agent.status}
-                    </span>
+                    </button>
                   </TableCell>
                   <TableCell>
                     <div className="flex gap-2">
-                      <Button variant="ghost" size="sm">
+                      <Button variant="ghost" size="sm" onClick={() => {
+                        setEditingAgent(agent)
+                        setIsOpen(true)
+                      }}>
                         <Eye className="w-4 h-4" />
                       </Button>
-                      <Button variant="ghost" size="sm">
+                      <Button variant="ghost" size="sm" onClick={() => {
+                        setEditingAgent(agent)
+                        setIsOpen(true)
+                      }}>
                         <Edit2 className="w-4 h-4" />
                       </Button>
                       <Button
@@ -210,3 +268,4 @@ export default function AgentsPage() {
     </div>
   )
 }
+

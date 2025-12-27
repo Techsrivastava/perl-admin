@@ -35,6 +35,7 @@ export function Sidebar() {
     { label: "Wallet & Ledger", icon: CreditCard, href: "/admin/wallet" },
     { label: "Expenses", icon: CreditCard, href: "/admin/expenses" },
     { label: "Reports", icon: BarChart3, href: "/admin/reports" },
+    { label: "Landing CMS", icon: Building2, href: "/admin/landing" }, // Added Landing Page
     { label: "Permissions", icon: Settings, href: "/admin/permissions" },
     { label: "Settings", icon: Settings, href: "/admin/settings" },
   ]

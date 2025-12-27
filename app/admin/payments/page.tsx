@@ -143,7 +143,7 @@ export default function PaymentsPage() {
       setPayments(confirmed)
       setPendingSubmissions(pending)
     } catch (error: any) {
-      console.error('Error loading payments:', error)
+      console.error('Error loading payments:', JSON.stringify(error, null, 2))
     } finally {
       setLoading(false)
     }

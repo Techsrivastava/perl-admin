@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Plus, Edit2, Trash2, Settings } from "lucide-react"
 import { UniversityForm } from "@/components/admin/university-form"
 import { UniversityPermissionsModal } from "@/components/admin/university-permissions-modal"
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { createClient } from "@/lib/supabase"
 
@@ -66,10 +67,25 @@ export default function UniversitiesPage() {
     }
   }
 
-  const handleDelete = (id: string) => {
-    setUniversities(universities.filter((u) => u.id !== id))
-    setDeleteConfirmId(null)
-    alert('University deleted successfully!')
+  const handleDelete = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this university?")) return
+
+    try {
+      const supabase = createClient()
+      const { error } = await supabase
+        .from('universities')
+        .delete()
+        .eq('id', id)
+
+      if (error) throw error
+
+      setUniversities(universities.filter((u) => u.id !== id))
+      setDeleteConfirmId(null)
+      alert("University deleted successfully!")
+    } catch (error: any) {
+      console.error('Error deleting university:', error)
+      alert('Failed to delete university')
+    }
   }
 
   const handleEdit = (uni: University) => {
@@ -99,24 +115,25 @@ export default function UniversitiesPage() {
     <div className="p-8 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Universities Management</h1>
-        <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-          <DialogTrigger asChild>
+        <Sheet open={addDialogOpen} onOpenChange={setAddDialogOpen}>
+          <SheetTrigger asChild>
             <Button className="gap-2">
               <Plus className="w-4 h-4" />
               Add University
             </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-4xl">
-            <DialogHeader>
-              <DialogTitle>Add New University</DialogTitle>
-            </DialogHeader>
-            <UniversityForm onSuccess={() => {
-              setAddDialogOpen(false)
-              loadUniversities() // Reload universities
-              alert('University created successfully!')
-            }} />
-          </DialogContent>
-        </Dialog>
+          </SheetTrigger>
+          <SheetContent className="min-w-[50vw] overflow-y-auto" side="right">
+            <SheetHeader>
+              <SheetTitle>Add New University</SheetTitle>
+            </SheetHeader>
+            <div className="mt-6">
+              <UniversityForm onSuccess={() => {
+                setAddDialogOpen(false)
+                loadUniversities() // Reload universities
+              }} />
+            </div>
+          </SheetContent>
+        </Sheet>
       </div>
 
       {loading ? (
@@ -188,24 +205,27 @@ export default function UniversitiesPage() {
       )}
 
       {/* Edit Dialog */}
-      <Dialog open={editDialogOpen} onOpenChange={(open) => {
+      {/* Edit Sheet (was Dialog) */}
+      <Sheet open={editDialogOpen} onOpenChange={(open) => {
         setEditDialogOpen(open)
         if (!open) setSelectedUni(null)
       }}>
-        <DialogContent className="max-w-4xl">
-          <DialogHeader>
-            <DialogTitle>Edit University</DialogTitle>
-          </DialogHeader>
-          <UniversityForm
-            onSuccess={() => {
-              setEditDialogOpen(false)
-              setSelectedUni(null)
-              loadUniversities() // Reload universities
-              alert('University updated successfully!')
-            }}
-          />
-        </DialogContent>
-      </Dialog>
+        <SheetContent className="min-w-[50vw] overflow-y-auto" side="right">
+          <SheetHeader>
+            <SheetTitle>Edit University</SheetTitle>
+          </SheetHeader>
+          <div className="mt-6">
+            <UniversityForm
+              editData={selectedUni}
+              onSuccess={() => {
+                setEditDialogOpen(false)
+                setSelectedUni(null)
+                loadUniversities() // Reload universities
+              }}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {/* Permissions Dialog */}
       <Dialog open={permissionsDialogOpen} onOpenChange={(open) => {

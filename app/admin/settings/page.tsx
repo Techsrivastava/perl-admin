@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Save, RotateCcw, Settings, Globe, Percent, Bell, ShieldAlert, Cpu, Database, DatabaseZap } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { createClient } from "@/lib/supabase"
@@ -51,7 +51,7 @@ export default function SettingsPage() {
         if (commission) setCommissionSettings(commission)
       }
     } catch (err: any) {
-      console.error("Error loading settings:", err)
+      console.error("Error loading settings:", JSON.stringify(err, null, 2))
     } finally {
       setLoading(false)
     }

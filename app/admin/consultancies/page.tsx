@@ -7,7 +7,7 @@ import { createClient } from "@/lib/supabase"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Plus, Edit2, Trash2, Eye } from "lucide-react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { ConsultancyForm } from "@/components/admin/consultancy-form"
 
 interface Consultancy {
@@ -29,6 +29,7 @@ export default function ConsultanciesPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isOpen, setIsOpen] = useState(false)
+  const [editData, setEditData] = useState<Consultancy | null>(null)
 
   // Load consultancies data on component mount
   useEffect(() => {
@@ -67,31 +68,55 @@ export default function ConsultanciesPage() {
     }
   }
 
-  const handleDelete = (id: number) => {
-    setConsultancies(consultancies.filter((c) => c.id !== id))
+  const handleDelete = async (id: number) => {
+    if (!confirm("Are you sure you want to delete this consultancy?")) return
+
+    try {
+      const supabase = createClient()
+      const { error } = await supabase
+        .from('consultancies')
+        .delete()
+        .eq('id', id)
+
+      if (error) throw error
+
+      setConsultancies(consultancies.filter((c) => c.id !== id))
+    } catch (error) {
+      console.error('Error deleting consultancy:', error)
+      alert("Failed to delete consultancy")
+    }
   }
 
   return (
     <div className="p-8 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Consultancies Management</h1>
-        <Dialog open={isOpen} onOpenChange={setIsOpen}>
-          <DialogTrigger asChild>
+        <Sheet open={isOpen} onOpenChange={(v) => {
+          setIsOpen(v)
+          if (!v) setEditData(null)
+        }}>
+          <SheetTrigger asChild>
             <Button className="gap-2">
               <Plus className="w-4 h-4" />
               Add Consultancy
             </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>Add New Consultancy</DialogTitle>
-            </DialogHeader>
-            <ConsultancyForm onSuccess={() => {
-              setIsOpen(false)
-              loadConsultancies() // Reload consultancies
-            }} />
-          </DialogContent>
-        </Dialog>
+          </SheetTrigger>
+          <SheetContent className="min-w-[40vw] overflow-y-auto" side="right">
+            <SheetHeader>
+              <SheetTitle>{editData ? "Edit Consultancy" : "Add New Consultancy"}</SheetTitle>
+            </SheetHeader>
+            <div className="mt-6">
+              <ConsultancyForm
+                editData={editData}
+                onSuccess={() => {
+                  setIsOpen(false)
+                  setEditData(null)
+                  loadConsultancies()
+                }}
+              />
+            </div>
+          </SheetContent>
+        </Sheet>
       </div>
 
       {loading ? (
@@ -137,11 +162,27 @@ export default function ConsultanciesPage() {
                 </div>
 
                 <div className="flex gap-2 pt-4 border-t border-border">
-                  <Button variant="ghost" size="sm" className="flex-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => {
+                      setEditData(consultancy)
+                      setIsOpen(true)
+                    }}
+                  >
                     <Eye className="w-4 h-4 mr-2" />
                     View
                   </Button>
-                  <Button variant="ghost" size="sm" className="flex-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="flex-1"
+                    onClick={() => {
+                      setEditData(consultancy)
+                      setIsOpen(true)
+                    }}
+                  >
                     <Edit2 className="w-4 h-4 mr-2" />
                     Edit
                   </Button>

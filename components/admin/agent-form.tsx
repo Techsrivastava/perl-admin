@@ -13,20 +13,22 @@ import { createClient } from "@/lib/supabase"
 interface AgentFormProps {
   onSuccess?: () => void
   consultancyId?: string
+  editData?: any // Added for edit mode
 }
 
-export function AgentForm({ onSuccess, consultancyId }: AgentFormProps) {
+export function AgentForm({ onSuccess, consultancyId, editData }: AgentFormProps) {
   const [loading, setLoading] = useState(false)
   const [consultancies, setConsultancies] = useState<{ id: string, name: string }[]>([])
 
   const [formData, setFormData] = useState({
-    name: "",
-    consultancy_id: consultancyId || "",
-    contact_email: "",
-    contact_phone: "",
-    city: "",
-    state: "",
-    default_commission_percent: "10",
+    name: editData?.name || "",
+    consultancy_id: editData?.consultancy_id || consultancyId || "",
+    contact_email: editData?.contact_email || "",
+    contact_phone: editData?.contact_phone || "",
+    city: editData?.city || "",
+    state: editData?.state || "",
+    password: "", // Don't pre-fill password for security/edit unless requested
+    default_commission_percent: editData?.commission_rate?.toString() || "10",
   })
 
   // Fetch consultancies for dropdown
@@ -46,39 +48,70 @@ export function AgentForm({ onSuccess, consultancyId }: AgentFormProps) {
     try {
       const supabase = createClient()
 
-      const insertData = {
-        name: formData.name,
-        consultancy_id: formData.consultancy_id,
-        contact_email: formData.contact_email,
-        contact_phone: formData.contact_phone,
-        city: formData.city,
-        state: formData.state,
-        commission_rate: parseFloat(formData.default_commission_percent),
-        status: 'active', // default status
-        wallet_balance: 0.00
+      if (editData) {
+        // Update Logic
+        const updateData: any = {
+          name: formData.name,
+          consultancy_id: formData.consultancy_id,
+          contact_email: formData.contact_email,
+          contact_phone: formData.contact_phone,
+          city: formData.city,
+          state: formData.state,
+          commission_rate: parseFloat(formData.default_commission_percent),
+        }
+        // Only update password if user entered a new one
+        if (formData.password) {
+          updateData.password_hash = formData.password
+        }
+
+        const { error } = await supabase
+          .from('agents')
+          .update(updateData)
+          .eq('id', editData.id)
+
+        if (error) throw error
+
+      } else {
+        // Create Logic
+        const insertData = {
+          name: formData.name,
+          consultancy_id: formData.consultancy_id,
+          contact_email: formData.contact_email,
+          contact_phone: formData.contact_phone,
+          city: formData.city,
+          state: formData.state,
+          commission_rate: parseFloat(formData.default_commission_percent),
+          status: 'active', // default status
+          wallet_balance: 0.00,
+          password_hash: formData.password
+        }
+
+        const { error } = await supabase
+          .from('agents')
+          .insert(insertData)
+
+        if (error) throw error
       }
-
-      const { error } = await supabase
-        .from('agents')
-        .insert(insertData)
-
-      if (error) throw error
 
       onSuccess?.()
 
-      setFormData({
-        name: "",
-        consultancy_id: consultancyId || "",
-        contact_email: "",
-        contact_phone: "",
-        city: "",
-        state: "",
-        default_commission_percent: "10",
-      })
+      // Reset only if not editing (modal usually closes on edit success)
+      if (!editData) {
+        setFormData({
+          name: "",
+          consultancy_id: consultancyId || "",
+          contact_email: "",
+          contact_phone: "",
+          city: "",
+          state: "",
+          password: "",
+          default_commission_percent: "10",
+        })
+      }
 
     } catch (error: any) {
-      console.error("Failed to add agent:", error)
-      alert(`Failed to add agent: ${error.message}`)
+      console.error("Failed to save agent:", error)
+      alert(`Failed to save agent: ${error.message}`)
     } finally {
       setLoading(false)
     }
@@ -138,6 +171,19 @@ export function AgentForm({ onSuccess, consultancyId }: AgentFormProps) {
               onChange={(e) => setFormData({ ...formData, contact_phone: e.target.value })}
               required
               maxLength={10}
+            />
+          </div>
+
+          <div>
+            <Label htmlFor="password">Password (For Login) *</Label>
+            <Input
+              id="password"
+              type="text"
+              placeholder="Set temporary password"
+              value={formData.password}
+              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+              required
+              minLength={6}
             />
           </div>
 

@@ -8,31 +8,34 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { createClient } from "@/lib/supabase"
 
+
 interface ConsultancyFormProps {
   onSuccess?: () => void
+  editData?: any // Added for edit mode
 }
 
-export function ConsultancyForm({ onSuccess }: ConsultancyFormProps) {
+export function ConsultancyForm({ onSuccess, editData }: ConsultancyFormProps) {
   const [loading, setLoading] = useState(false)
   const [formData, setFormData] = useState({
-    name: "",
-    owner_name: "",
-    registration_number: "",
-    contact_email: "",
-    contact_phone: "",
-    address: "",
-    city: "",
-    state: "",
-    country: "",
-    // Bank Details
-    bank_name: "",
-    bank_account_number: "",
-    bank_ifsc: "",
-    bank_branch: "",
-    account_holder_name: "",
+    name: editData?.name || "",
+    owner_name: editData?.owner_name || "",
+    registration_number: editData?.registration_no || "",
+    contact_email: editData?.contact_email || "",
+    contact_phone: editData?.contact_phone || "",
+    address: editData?.address?.split(', ')[0] || "",
+    city: editData?.address?.split(', ')[1] || "",
+    state: editData?.address?.split(', ')[2] || "",
+    country: "", // Assuming country isn't stored in simple string or default
+    // Bank Details (using optional chaining safely)
+    bank_name: editData?.bank_details?.bank_name || "",
+    bank_account_number: editData?.bank_details?.account_number || "",
+    bank_ifsc: editData?.bank_details?.ifsc_code || "",
+    bank_branch: editData?.bank_details?.branch || "",
+    account_holder_name: editData?.bank_details?.holder_name || "",
     // GST & Legal
-    gst_number: "",
-    pan_number: "",
+    gst_number: editData?.bank_details?.gst_number || "",
+    pan_number: editData?.bank_details?.pan_number || "",
+    password: "", // Password usually reset on edit or left blank to keep existing
   })
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -42,14 +45,14 @@ export function ConsultancyForm({ onSuccess }: ConsultancyFormProps) {
     try {
       const supabase = createClient()
 
-      const insertData = {
+      const payload = {
         name: formData.name,
         owner_name: formData.owner_name,
         registration_no: formData.registration_number,
         contact_email: formData.contact_email,
         contact_phone: formData.contact_phone,
         address: `${formData.address}, ${formData.city}, ${formData.state}`,
-        status: 'approved',
+        status: editData?.status || 'approved',
         bank_details: {
           bank_name: formData.bank_name,
           account_number: formData.bank_account_number,
@@ -59,38 +62,55 @@ export function ConsultancyForm({ onSuccess }: ConsultancyFormProps) {
           gst_number: formData.gst_number,
           pan_number: formData.pan_number
         },
-        wallet_balance: 0.00
+        // Only update password if provided
+        ...(formData.password ? { password_hash: formData.password } : {})
       }
 
-      const { error } = await supabase
-        .from('consultancies')
-        .insert(insertData)
-
-      if (error) throw error
+      if (editData?.id) {
+        // Update
+        const { error } = await supabase
+          .from('consultancies')
+          .update(payload)
+          .eq('id', editData.id)
+        if (error) throw error
+      } else {
+        // Insert
+        const { error } = await supabase
+          .from('consultancies')
+          .insert({
+            ...payload,
+            wallet_balance: 0.00,
+            password_hash: formData.password // Required for new
+          })
+        if (error) throw error
+      }
 
       onSuccess?.()
 
-      setFormData({
-        name: "",
-        owner_name: "",
-        registration_number: "",
-        contact_email: "",
-        contact_phone: "",
-        address: "",
-        city: "",
-        state: "",
-        country: "",
-        bank_name: "",
-        bank_account_number: "",
-        bank_ifsc: "",
-        bank_branch: "",
-        account_holder_name: "",
-        gst_number: "",
-        pan_number: "",
-      })
+      if (!editData) {
+        setFormData({
+          name: "",
+          owner_name: "",
+          registration_number: "",
+          contact_email: "",
+          contact_phone: "",
+          address: "",
+          city: "",
+          state: "",
+          country: "",
+          bank_name: "",
+          bank_account_number: "",
+          bank_ifsc: "",
+          bank_branch: "",
+          account_holder_name: "",
+          gst_number: "",
+          pan_number: "",
+          password: "",
+        })
+      }
     } catch (error: any) {
-      console.error("Failed to add consultancy:", error)
-      alert(`Failed to add consultancy: ${error.message}`)
+      console.error("Failed to save consultancy:", error)
+      alert(`Failed to save consultancy: ${error.message}`)
     } finally {
       setLoading(false)
     }
@@ -155,6 +175,18 @@ export function ConsultancyForm({ onSuccess }: ConsultancyFormProps) {
               value={formData.contact_phone}
               onChange={(e) => setFormData({ ...formData, contact_phone: e.target.value })}
               required
+            />
+          </div>
+
+          <div>
+            <Label htmlFor="password">Login Password *</Label>
+            <Input
+              id="password"
+              placeholder="Set admin password"
+              value={formData.password}
+              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+              required
+              minLength={6}
             />
           </div>
 
@@ -286,8 +318,9 @@ export function ConsultancyForm({ onSuccess }: ConsultancyFormProps) {
       </div>
 
       <Button type="submit" disabled={loading} className="w-full">
-        {loading ? "Creating..." : "Create Consultancy"}
+        {loading ? (editData ? "Updating..." : "Creating...") : (editData ? "Update Consultancy" : "Create Consultancy")}
       </Button>
     </form>
   )
 }
+

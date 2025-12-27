@@ -12,27 +12,29 @@ import { createClient } from "@/lib/supabase"
 
 interface UniversityFormProps {
   onSuccess: () => void
+  editData?: any
 }
 
-export function UniversityForm({ onSuccess }: UniversityFormProps) {
+export function UniversityForm({ onSuccess, editData }: UniversityFormProps) {
   const [formData, setFormData] = useState({
     // Basic Info
-    name: "",
-    short_name: "",
-    email: "",
-    phone: "",
-    state: "",
-    city: "",
-    address: "",
-    established_year: "",
+    name: editData?.name || "",
+    short_name: editData?.abbreviation || "",
+    email: editData?.contact_email || "",
+    phone: editData?.contact_phone || "",
+    state: editData?.state || "",
+    city: editData?.city || "",
+    address: editData?.address || "",
+    established_year: editData?.established_year || "",
     // Legal
-    registration_type: "",
-    registration_no: "",
-    // Authorized Person
-    auth_person_name: "",
-    auth_person_email: "",
-    auth_person_mobile: "",
-    auth_person_designation: "",
+    registration_type: editData?.type || "",
+    registration_no: editData?.registration_no || "",
+    // Authorized Person (If stored in JSON or separate columns, adjust. Assuming separate column based on previous insert)
+    auth_person_name: editData?.authorized_person || "",
+    auth_person_email: editData?.authorized_person_email || "", // Assuming potential schema column or missing
+    auth_person_mobile: editData?.authorized_person_mobile || "",
+    auth_person_designation: editData?.authorized_person_designation || "",
+    password: "", // Added
   })
 
   const [loading, setLoading] = useState(false)
@@ -49,52 +51,65 @@ export function UniversityForm({ onSuccess }: UniversityFormProps) {
     try {
       const supabase = createClient()
 
-      const insertData = {
+      const payload = {
         name: formData.name,
-        abbreviation: formData.short_name.toUpperCase(),
+        abbreviation: formData.short_name?.toUpperCase(),
         established_year: parseInt(formData.established_year) || null,
         type: formData.registration_type,
         registration_no: formData.registration_no,
-        authorized_person: formData.auth_person_name, // Mapping to schema column
+        authorized_person: formData.auth_person_name,
         contact_email: formData.email,
         contact_phone: formData.phone,
-        address: `${formData.address}, ${formData.city}, ${formData.state}`, // Composite address
+        address: formData.address, // Use raw address if storing separately is preferred, or composite if needed. Keeping simple.
         city: formData.city,
         state: formData.state,
-        status: 'approved', // Auto-approve for SuperAdmin creation
-        // Additional mappings if needed
-        wallet_balance: 0.00
+        status: editData?.status || 'approved',
+        // Additional mappings
+        ...(formData.password ? { password_hash: formData.password } : {})
       }
 
-      const { error } = await supabase
-        .from('universities')
-        .insert(insertData)
-
-      if (error) throw error
+      if (editData?.id) {
+        const { error } = await supabase
+          .from('universities')
+          .update(payload)
+          .eq('id', editData.id)
+        if (error) throw error
+      } else {
+        const { error } = await supabase
+          .from('universities')
+          .insert({
+            ...payload,
+            wallet_balance: 0.00,
+            password_hash: formData.password // Required for new
+          })
+        if (error) throw error
+      }
 
       onSuccess()
 
-      // Reset form
-      setFormData({
-        name: "",
-        short_name: "",
-        email: "",
-        phone: "",
-        state: "",
-        city: "",
-        address: "",
-        established_year: "",
-        registration_type: "",
-        registration_no: "",
-        auth_person_name: "",
-        auth_person_email: "",
-        auth_person_mobile: "",
-        auth_person_designation: "",
-      })
+      if (!editData) {
+        setFormData({
+          name: "",
+          short_name: "",
+          email: "",
+          phone: "",
+          state: "",
+          city: "",
+          address: "",
+          established_year: "",
+          registration_type: "",
+          registration_no: "",
+          auth_person_name: "",
+          auth_person_email: "",
+          auth_person_mobile: "",
+          auth_person_designation: "",
+          password: "",
+        })
+      }
 
     } catch (error: any) {
-      console.error('Failed to create university:', error)
-      alert(`Failed to create university: ${error.message}`)
+      console.error('Failed to save university:', error)
+      alert(`Failed to save university: ${error.message}`)
     } finally {
       setLoading(false)
     }
@@ -165,6 +180,20 @@ export function UniversityForm({ onSuccess }: UniversityFormProps) {
               required
               placeholder="+91 9876543210"
               maxLength={10}
+            />
+          </div>
+
+          <div>
+            <Label htmlFor="password">Login Password *</Label>
+            <Input
+              id="password"
+              name="password"
+              type="text"
+              value={formData.password}
+              onChange={handleChange}
+              required
+              placeholder="Set admin password"
+              minLength={6}
             />
           </div>
 

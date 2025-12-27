@@ -7,8 +7,9 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Plus, Edit2, Trash2 } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { CourseManagementModal } from "@/components/admin/course-management-modal"
+import { BulkMappingModal } from "@/components/admin/bulk-mapping-modal"
 import { useToast } from "@/hooks/use-toast"
 import { Badge } from "@/components/ui/badge"
 import { createClient } from "@/lib/supabase"
@@ -23,6 +24,7 @@ interface Course {
   stream?: string // Added missing stream property
   degreeType?: string
   duration?: string
+  semesters?: number
   modeOfStudy?: string
   level?: string
   fees?: number
@@ -118,7 +120,9 @@ export default function CoursesPage() {
   const [error, setError] = useState<string | null>(null)
 
   const [activeTab, setActiveTab] = useState<"master" | "university">("university")
+  const [modalMode, setModalMode] = useState<"master" | "university">("university")
   const [courseModalOpen, setCourseModalOpen] = useState(false)
+  const [isBulkMapOpen, setIsBulkMapOpen] = useState(false)
   const [mapCourseDialogOpen, setMapCourseDialogOpen] = useState(false)
   const [editingMapping, setEditingMapping] = useState<any | null>(null)
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
@@ -141,7 +145,15 @@ export default function CoursesPage() {
 
       if (error) throw error
 
-      setCourses(data || [])
+      // Transform snake_case DB fields to camelCase Interface fields
+      const transformedData = (data || []).map((course: any) => ({
+        ...course,
+        isActive: course.is_active,
+        // Map other potentially missing fields if the UI relies on them
+        // For master courses, fees are not stored, so we use 0 or leave it to be handled by the UI checks
+      }))
+
+      setCourses(transformedData)
       setError(null)
     } catch (error) {
       console.error('Error loading courses:', error)
@@ -156,6 +168,7 @@ export default function CoursesPage() {
       const supabase = createClient()
       const { data, error } = await supabase
         .from('university_courses')
+        .select('*') // Select all fields including new v11 ones
         .select('*, universities(name), master_courses(name)')
         .order('created_at', { ascending: false })
 
@@ -239,6 +252,7 @@ export default function CoursesPage() {
   const handleEditCourse = (course: any) => {
     // Map master course fields to the format expected by the modal
     setEditingMapping({
+      id: course.id, // CRITICAL: Required for update logic to trigger instead of insert
       master_course_id: course.id,
       name: course.name,
       code: course.code,
@@ -249,6 +263,7 @@ export default function CoursesPage() {
       metadata: { description: course.description },
       is_active: course.is_active
     })
+    setModalMode("master")
     setCourseModalOpen(true)
   }
 
@@ -264,6 +279,7 @@ export default function CoursesPage() {
 
       if (error) throw error
       setEditingMapping(data)
+      setModalMode("university")
       setCourseModalOpen(true)
     } finally {
       setLoading(false)
@@ -321,39 +337,15 @@ export default function CoursesPage() {
       {activeTab === "master" && (
         <div className="space-y-6">
           <div className="flex justify-end">
-            <Dialog
-              open={courseModalOpen}
-              onOpenChange={(v: boolean) => {
-                setCourseModalOpen(v)
-                if (!v) setEditingMapping(null)
+            <Button
+              className="gap-2 bg-primary font-black shadow-lg shadow-primary/20"
+              onClick={() => {
+                setModalMode("master")
+                setCourseModalOpen(true)
               }}
             >
-              <DialogTrigger asChild>
-                <Button className="gap-2 bg-primary font-black shadow-lg shadow-primary/20">
-                  <Plus className="w-4 h-4" /> Add Academic Program
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-4xl p-0 overflow-hidden border-none">
-                <div className="p-6 bg-slate-900 text-white">
-                  <h2 className="text-2xl font-black flex items-center gap-3">
-                    <Plus className="w-8 h-8 text-primary" />
-                    {editingMapping ? "Refine Course Offering" : "Launch New Program"}
-                  </h2>
-                  <p className="text-slate-400 text-xs mt-1 uppercase tracking-widest">Manual Deployment Console</p>
-                </div>
-                <div className="p-6">
-                  <CourseManagementModal
-                    editData={editingMapping}
-                    onSuccess={() => {
-                      setCourseModalOpen(false)
-                      setEditingMapping(null)
-                      loadCourses()
-                      loadUniversityCourses()
-                    }}
-                  />
-                </div>
-              </DialogContent>
-            </Dialog>
+              <Plus className="w-4 h-4" /> Add Academic Program
+            </Button>
           </div>
 
           {/* Master Courses Table */}
@@ -370,9 +362,7 @@ export default function CoursesPage() {
                       <TableHead>Stream</TableHead>
                       <TableHead>Level</TableHead>
                       <TableHead>Duration</TableHead>
-                      <TableHead>Mode</TableHead>
-                      <TableHead>Fee (₹)</TableHead>
-                      <TableHead>Seats</TableHead>
+                      <TableHead>Semesters</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead>Action</TableHead>
                     </TableRow>
@@ -380,7 +370,7 @@ export default function CoursesPage() {
                   <TableBody>
                     {courses.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                        <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                           No courses found. Add your first course to get started.
                         </TableCell>
                       </TableRow>
@@ -393,11 +383,7 @@ export default function CoursesPage() {
                             <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-sm">{course.level}</span>
                           </TableCell>
                           <TableCell>{course.duration || 'N/A'}</TableCell>
-                          <TableCell>{course.modeOfStudy || 'N/A'}</TableCell>
-                          <TableCell className="font-semibold">
-                            {course.fees ? `₹${(course.fees / 100000).toFixed(1)}L` : 'N/A'}
-                          </TableCell>
-                          <TableCell>{course.totalSeats || 'N/A'}</TableCell>
+                          <TableCell>{course.semesters || 'N/A'}</TableCell>
                           <TableCell>
                             <span className={`px-2 py-1 rounded text-sm ${course.isActive ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                               {course.isActive ? 'Active' : 'Inactive'}
@@ -458,7 +444,7 @@ export default function CoursesPage() {
       {activeTab === "university" && (
         <div className="space-y-6">
           <div className="flex justify-end">
-            <Button className="gap-2" onClick={() => setCourseModalOpen(true)}>
+            <Button className="gap-2" onClick={() => setIsBulkMapOpen(true)}>
               <Plus className="w-4 h-4" /> Map New Course
             </Button>
           </div>
@@ -499,7 +485,10 @@ export default function CoursesPage() {
                           <span className="text-[10px] text-muted-foreground uppercase">{uc.commission_type} Payout</span>
                         </div>
                       </TableCell>
-                      <TableCell className="font-medium">{uc.intake_capacity}</TableCell>
+                      <TableCell className="font-medium">
+                        {uc.intake_capacity}
+                        <span className="block text-[10px] text-muted-foreground">Seats</span>
+                      </TableCell>
                       <TableCell>
                         <span className="px-2 py-1 bg-purple-100 text-purple-800 rounded text-[10px] font-bold uppercase tracking-widest">
                           {uc.mode_of_study}
@@ -588,6 +577,46 @@ export default function CoursesPage() {
           </Card>
         </div>
       )}
+      {/* Global Course Management Sheet */}
+      <Sheet
+        open={courseModalOpen}
+        onOpenChange={(v: boolean) => {
+          setCourseModalOpen(v)
+          if (!v) setEditingMapping(null)
+        }}
+      >
+        <SheetContent className="min-w-[50vw] p-0 overflow-y-auto" side="right">
+          <SheetHeader className="p-6 bg-slate-900 text-white space-y-1">
+            <SheetTitle className="text-2xl font-black flex items-center gap-3 text-white">
+              <Plus className="w-8 h-8 text-primary" />
+              {editingMapping
+                ? (modalMode === 'master' ? "Edit Master Course" : "Edit Course Mapping")
+                : (modalMode === 'master' ? "Create New Course" : "Map Course to University")
+              }
+            </SheetTitle>
+            <p className="text-slate-400 text-xs uppercase tracking-widest">
+              {modalMode === 'master' ? "Global Master Database" : "University Allocation Console"}
+            </p>
+          </SheetHeader>
+          <div className="p-6">
+            <CourseManagementModal
+              mode={modalMode}
+              editData={editingMapping}
+              onSuccess={() => {
+                setCourseModalOpen(false)
+                setEditingMapping(null)
+                loadCourses()
+                loadUniversityCourses()
+              }}
+            />
+          </div>
+        </SheetContent>
+      </Sheet>
+      <BulkMappingModal
+        isOpen={isBulkMapOpen}
+        onClose={() => setIsBulkMapOpen(false)}
+        onSuccess={loadUniversityCourses}
+      />
     </div>
   )
 }
